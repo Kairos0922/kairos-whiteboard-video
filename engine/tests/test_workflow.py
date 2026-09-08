@@ -32,7 +32,8 @@ class WorkflowTest(unittest.TestCase):
         state = json.loads((self.ep / "state.json").read_text(encoding="utf-8"))
         self.assertFalse(state["phases"]["script_audio_confirmed"])   # 新项目从待审起步
         self.assertFalse(state["phases"]["express_card_filled"])      # 表达设计卡第一步门
-        self.assertFalse(state["confirmations"])                      # 无焊死的确认记录
+        # 三个确认标志全为 False = 无焊死的确认记录（schema v2：confirmations 为 dict）
+        self.assertFalse(any(state["confirmations"].values()))
         express = (self.ep / "input" / "express-card.md").read_text(encoding="utf-8")
         self.assertIn("表达设计卡", express)
         self.assertIn("心智模型", express)
@@ -59,6 +60,9 @@ class WorkflowTest(unittest.TestCase):
         self.args.boards_dir = str(boards)
         good = np.zeros((1080, 1920, 3), np.uint8)
         good[:] = (235, 242, 245)  # 暖白纸面 BGR（paper 模式，四角亮度 > 185）
+        # 补足内容以通过空白闸门（std≥15 且边缘占比≥0.5%，review_images 新契约）
+        for i in range(24):
+            cv2.line(good, (300, 80 + i * 40), (1500, 80 + i * 40), (60, 60, 60), 2)
         cv2.imwrite(str(boards / "scene-01.png"), good)
         bad = np.zeros((1080, 1920, 3), np.uint8)
         bad[:] = (48, 58, 32)  # #203A30 黑板绿 BGR：paper 模式判「不像纸面白」
@@ -128,8 +132,9 @@ class CheckBoardTest(unittest.TestCase):
         import numpy as np
 
         img = self._img(1920, 1080, (235, 242, 245))  # 暖白纸面
-        # 加一个底部小元素，不至于全空判定
-        img[1000:1010, 200:210] = (60, 60, 60)
+        # 补足内容以通过空白闸门（std≥15 且边缘占比≥0.5%，review_images 新契约）
+        for i in range(24):
+            cv2.line(img, (300, 80 + i * 40), (1500, 80 + i * 40), (60, 60, 60), 2)
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "b.png"
             cv2.imwrite(str(p), img)

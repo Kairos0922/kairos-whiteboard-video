@@ -270,11 +270,12 @@ class OpsSubwindowTest(unittest.TestCase):
                 self.assertLess(prev[-1].end_ms, nxt[0].start_ms)
                 self.assertGreaterEqual(nxt[0].start_ms - prev[-1].end_ms,
                                         K.SUB_WINDOW_GAP_MS - 5)
-            # 全部任务仍在 panel-2 窗口内
+            # 全部任务仍在 panel-2 窗口内（v2 区域严格串行：窗口重叠时后区会被前区
+            # 推迟一个 REGION_GAP_MS 隔断余量，允许该余量的超窗）
             el = ann.elements[2]
             self.assertGreaterEqual(min(t.start_ms for t in p2), el.start_ms)
             self.assertLessEqual(max(t.end_ms for t in p2),
-                                 el.start_ms + el.duration_ms + 1)
+                                 el.start_ms + el.duration_ms + K.REGION_GAP_MS + 1)
 
     def test_outline_then_fill_per_object(self):
         """鬼影修复的行为验证（逐对象推进）：下方对象（y=200 横线）的完成时间
