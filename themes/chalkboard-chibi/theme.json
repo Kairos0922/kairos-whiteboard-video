@@ -1,0 +1,26 @@
+{
+  "id": "chalkboard-chibi",
+  "name": "黑板粉笔 Q 版讲解",
+  "renderer_mode": "chalk",
+  "resolution": [
+    1920,
+    1080
+  ],
+  "style_block": {
+    "frozen": true,
+    "status": "frozen"
+  },
+  "palette": {
+    "board": "#123D35",
+    "chalk": "#E8DFC9",
+    "risk_and_questions": "#CF7B70",
+    "discovery": "#C6A55C"
+  },
+  "hands": [
+    {
+      "id": "hand-chalk",
+      "file": "hands/hand-chalk.png",
+      "tip": "hands/hand-chalk.tip.json"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "comment": "引擎内建声音身份（不跟主题走）。2026-08-28 项目维护者从 6 音色矩阵盲听拍板。",
+  "backend": "edge-tts",
+  "name": "zh-CN-YunxiaNeural",
+  "rate": "+0%",
+  "decided_by": "maintainer",
+  "decided_at": "2026-08-28"
+}

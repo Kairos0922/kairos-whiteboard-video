@@ -1,0 +1,12 @@
+{
+  "comment": "只有经宿主模型探针验证、项目冻结风格块的主题才登记。首个本地扩散通道主题包已于 2026-09 清退。",
+  "themes": [
+    {
+      "id": "chalkboard-chibi",
+      "name": "黑板粉笔 Q 版讲解",
+      "path": "themes/chalkboard-chibi",
+      "renderer_mode": "chalk",
+      "resolution": [1920, 1080]
+    }
+  ]
+}

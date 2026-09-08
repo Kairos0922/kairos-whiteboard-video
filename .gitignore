@@ -1,0 +1,21 @@
+# Python 虚拟环境（cd engine && uv sync 可重建，171M 不入库）
+.venv/
+engine/.venv/
+
+# Python 运行产物
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# 单期视频现场：短周期产物，可由 input/ + 引擎重跑再生，不进长期仓库
+# （长期维护的是规范 references/、引擎 engine/、主题包 themes/；期次现场只留在本地）
+projects/
+
+# 本地实验脚手架与散件
+scratch/
+
+# 环境密钥（模板 engine/.env.example 入库，.env 不入库）
+.env
+engine/.env

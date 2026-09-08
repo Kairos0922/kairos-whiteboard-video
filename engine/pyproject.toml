@@ -1,0 +1,22 @@
+# kairos-whiteboard-video 引擎运行环境；同步命令：cd 本目录 && uv sync
+[project]
+name = "kairos-whiteboard-video"
+version = "0.1.0"
+description = "白板叙事引擎：脚本设计 → 板图 → 标注 → 渲染 → 合成"
+requires-python = ">=3.11"
+dependencies = [
+    "opencv-python-headless>=4.8",
+    "numpy>=1.26",
+    "pillow>=10.0",
+    "whiteboard-video-engine",
+    "edge-tts>=7.2.8",
+]
+
+# 渲染内核 v1 已就位（scripts/whiteboard_story/kernel.py）：分区时序揭示 + 骨架描线 +
+# 蛇形填色，数学底座复用上方 MIT 引擎（锁定 commit）。设计决策见 references/kernel-design.md。
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+whiteboard-video-engine = { git = "https://github.com/gnipbao/whiteboard-video-engine.git", rev = "31552154230340371d33c9235b297ba564298a1c" }
