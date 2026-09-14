@@ -20,6 +20,7 @@ CORNER_TOL = 60                  # 与底色 BGR 单通道差上限
 BOTTOM_BAND_RATIO = 0.20        # 底部 1/5 为字幕区
 MIN_LONG_EDGE = 1920
 ASPECT = 16.0 / 9.0
+ASPECT_TOL = 0.03              # 「16:9 家族」准入带宽：宿主常出 1792×1024（=1.75，差 0.028）
 
 
 def _hex_to_bgr(hex_color: str) -> np.ndarray:
@@ -41,6 +42,46 @@ def _theme_mode(theme_dir: Path | None) -> tuple[str, np.ndarray | None]:
             board_bgr = _hex_to_bgr(board_hex) if board_hex else None
             return mode, board_bgr
     return "paper", None
+
+
+def normalize_board_size(path: Path,
+                         target_w: int = 1920, target_h: int = 1080) -> dict:
+    """把「16:9 家族」的板图归一化到 1920×1080（写回原文件）。
+
+    生图服务常输出 1200×675 这类 16:9 小图，也常只能出 1792×1024（=1.75）这类
+    近似 16:9 的档位，直接过 check_board 会被 MIN_LONG_EDGE 或长宽比阻断。
+    处理：比例落在 ASPECT_TOL 带内时，先**居中裁**到精确 16:9 再等比放大——
+    不用非等比拉伸（那会把板面几何畸变掉），裁切只动边缘余量
+    （构图纪律是四周留白 + 底部 1/5 空，内容不在被裁的那几像素上）。
+    内核描线在缩放后的像素上进行，笔画与填色自动按新尺度调度，缩放无损。
+    比例超出准入带的图不动，交给 check_board 按错误处理。
+
+    返回 {"scaled": bool, "size": 原尺寸 | None, "cropped": 裁切后中间尺寸 | None}；
+    scaled=False 时 size 为原尺寸（含读图失败时 None，调用方后续 check_board 会兜底报错）。
+    """
+    img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if img is None:
+        return {"scaled": False, "size": None, "cropped": None}
+    h, w = img.shape[:2]
+    if (w, h) == (target_w, target_h):
+        return {"scaled": False, "size": (w, h), "cropped": None}
+    if abs(w / max(h, 1) - ASPECT) > ASPECT_TOL:
+        return {"scaled": False, "size": (w, h), "cropped": None}
+    cropped = None
+    ratio = w / max(h, 1)
+    if abs(ratio - ASPECT) > 1e-6:
+        if ratio > ASPECT:                      # 过宽：裁左右两侧
+            keep_w = int(round(h * ASPECT))
+            x0 = (w - keep_w) // 2
+            img = img[:, x0:x0 + keep_w]
+        else:                                   # 过高：裁上下两侧
+            keep_h = int(round(w / ASPECT))
+            y0 = (h - keep_h) // 2
+            img = img[y0:y0 + keep_h, :]
+        cropped = (int(img.shape[1]), int(img.shape[0]))
+    resized = cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
+    cv2.imwrite(str(path), resized)
+    return {"scaled": True, "size": (w, h), "cropped": cropped}
 
 
 def check_board(path: Path, theme_dir: Path | None = None) -> dict:
@@ -120,15 +161,37 @@ def check_board(path: Path, theme_dir: Path | None = None) -> dict:
     return {"ok": not errors, "errors": errors, "warnings": warnings, "info": info}
 
 
+# 文字行判据（相对图高，跨分辨率成立）：
+# 同一行 = y 中心落在锚点 ±2.5% 图高的窄带内；行内字形高度均匀（CV≤0.2）、
+# 相邻间隙均匀（CV≤0.5）、平均字形高 ≤5% 图高、组件 ≥3 个；
+# 整体需 ≥1 个合格行且小区域总数 ≥8。
+# 阈值定标（2026-09-11）：真文字行 h_cv/gap_cv≈0；密集图示碎片假阳性
+# h_cv≥0.2、gap_cv≥0.8（chalkboard-chibi 探针图实测），故取 0.2/0.5。
+TEXT_LINE_BAND_RATIO = 0.025
+TEXT_LINE_HEIGHT_CV = 0.2
+TEXT_LINE_GAP_CV = 0.5
+TEXT_LINE_HEIGHT_CAP = 0.05
+TEXT_MIN_COMPONENTS = 8
+
+
 def _detect_text_regions(gray: np.ndarray, h: int, w: int) -> dict:
     """基于连通区域分析检测板图中的可读文字。
 
     文字特征：
     - 小连通区域（面积 20-3000 像素，宽高比 0.1-10）
-    - 水平方向密集排列（同一行内多个小区域，间距小）
+    - 组成水平"行"：y 中心同窄带、字形高度均匀、字形级大小
     - 排除角落水印区域（水印由 strip_watermark 单独处理）
 
-    返回：{likely_text, text_line_count, small_component_count, details}
+    已知局限（2026-09-11 修）：v0 用链式聚类（与上一个组件比 y 差），
+    密集图示符号会被串成纵贯半幅的假"行"（一排小人图标/图表节点必中），
+    导致 chalk 主题每张板图都误报警告。现改为锚点窄带聚类 + 高度/间隙
+    双均匀性判据（阈值经探针图定标，见常量注释）；尺寸字形级且间距均匀的
+    一排小图标仍可能触发，warning 交人工二审按返回的行坐标放大复核即可，
+    不阻断 import。另：自适应阈值在均匀深板上对亮色前景不敏感（检出能力
+    偏向暗色字形），板图无文字铁律最终靠人工二审把关，本检测只是辅助。
+
+    返回：{likely_text, text_line_count, small_component_count, lines, details}
+    lines 为合格行的外接框 [{x, y, w, h, n}]，供二审快速定位。
     """
     # 自适应二值化提取前景（粉笔线条）
     binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -147,34 +210,53 @@ def _detect_text_regions(gray: np.ndarray, h: int, w: int) -> dict:
             in_top_left = cx < w * 0.18 and cy < h * 0.10
             in_bottom_right = cx > w * 0.82 and cy > h * 0.92
             if not in_top_left and not in_bottom_right:
-                small_components.append((x, y, cw, ch, area, cx, cy))
+                small_components.append((int(x), int(y), int(cw), int(ch),
+                                         int(area), float(cx), float(cy)))
 
-    # 检测文字行：水平方向密集排列的小区域
-    # 按 y 坐标聚类（同一行的 y 坐标接近）
+    # 检测文字行：锚点窄带聚类（按 y 中心排序后，收齐锚点 ±band 内的全部组件），
+    # 再过双均匀性判据：字形高度 CV + 相邻间隙 CV。
     text_lines = []
     if len(small_components) >= 3:
-        # 按 y 中心排序
-        sorted_by_y = sorted(small_components, key=lambda c: c[5])
-        # 聚类：y 差小于 30 像素视为同一行
-        current_line = [sorted_by_y[0]]
-        for comp in sorted_by_y[1:]:
-            if abs(comp[5] - current_line[-1][5]) < 30:
-                current_line.append(comp)
-            else:
-                if len(current_line) >= 3:
-                    text_lines.append(current_line)
-                current_line = [comp]
-        if len(current_line) >= 3:
-            text_lines.append(current_line)
+        band = max(15.0, h * TEXT_LINE_BAND_RATIO)
+        height_cap = h * TEXT_LINE_HEIGHT_CAP
+        comps = sorted(small_components, key=lambda c: c[6])
+        i = 0
+        while i < len(comps):
+            anchor_cy = comps[i][6]
+            line = [c for c in comps[i:] if abs(c[6] - anchor_cy) <= band]
+            i += len(line)
+            if len(line) < 3:
+                continue
+            line.sort(key=lambda c: c[0])
+            heights = np.array([c[3] for c in line], dtype=np.float64)
+            gaps = np.array([line[j + 1][0] - (line[j][0] + line[j][2])
+                             for j in range(len(line) - 1)], dtype=np.float64)
+            height_cv = float(heights.std() / max(heights.mean(), 1e-6))
+            gap_cv = (float(gaps.std() / max(gaps.mean(), 1e-6))
+                      if len(gaps) >= 2 else 0.0)
+            if heights.mean() > height_cap or height_cv > TEXT_LINE_HEIGHT_CV \
+                    or gap_cv > TEXT_LINE_GAP_CV:
+                continue
+            text_lines.append(line)
 
-    # 判断是否可能有文字：至少 1 行，每行至少 3 个小区域，且小区域总数 >= 5
-    likely_text = len(text_lines) >= 1 and len(small_components) >= 5
+    likely_text = len(text_lines) >= 1 and len(small_components) >= TEXT_MIN_COMPONENTS
+
+    line_boxes = []
+    for line in text_lines:
+        x0 = min(c[0] for c in line)
+        y0 = min(c[1] for c in line)
+        x1 = max(c[0] + c[2] for c in line)
+        y1 = max(c[1] + c[3] for c in line)
+        line_boxes.append({"x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0,
+                           "n": len(line)})
 
     return {
         "likely_text": likely_text,
         "text_line_count": len(text_lines),
         "small_component_count": len(small_components),
-        "details": f"{len(text_lines)}行x{len(small_components)}区域" if likely_text else "无明显文字特征",
+        "lines": line_boxes,
+        "details": (f"{len(text_lines)}行x{len(small_components)}区域"
+                    if likely_text else "无明显文字特征"),
     }
 
 

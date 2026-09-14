@@ -6,15 +6,19 @@
   annotate 重生成标注：build/annotations/scene-XX.annotation.json（与 tts 时长对齐）
   render   渲染动画：boards-layout + annotations → build/scenes/scene-XX.mp4（paper 模式）
   assemble 合成成片：concat 当期全部幕 + 旁白 + 字幕 → deliverables/final.mp4
-  all      layout → annotate → render → assemble（串行）
+
+本脚本是裸阶段执行器，只回写 state.json 的 phases 标志，**不查三次确认闸门**；
+带闸门的调用走 workflow.py（render / confirm-*）。
 
 明确不在本脚本内：
   - 板图 PNG 由宿主模型按 workflow.py prompts 的词表生成，落 build/boards/ 后 import；
   - 分区坐标写在当期 input/layout.json，构图随板图变化，每期校准。
 
 用法示例（在本工具目录先 `uv sync`）：
-  uv run python build_video.py --episode-dir <ep> all
-  uv run python build_video.py --episode-dir <ep> render --scene scene-01
+  uv run python build_video.py --episode-dir <ep> layout
+  uv run python build_video.py --episode-dir <ep> annotate
+  uv run python build_video.py --episode-dir <ep> render --jobs 4
+  uv run python build_video.py --episode-dir <ep> assemble
 
 状态（2026-08-26）：layout / annotate / render / assemble 全链路可用；
 render 走自有分区同步内核（whiteboard_story/kernel.py，设计见 references/kernel-design.md）。
@@ -206,7 +210,8 @@ def cmd_render(ep: Path, args) -> int:
                 ep / "build" / "scenes" / f"{sid}.mp4",
                 hand, board_style="paper", fps=FPS,
                 overlay_png=ep / "build" / "boards-layout" / f"{sid}.png",
-                fade_from_png=prev)
+                fade_from_png=prev,
+                hand_follow=getattr(args, "hand_follow", 1.0))
             print(f"OK {sid}.mp4  {time.time() - t0:.0f}s  -> {out}")
         if not args.scene:
             _update_state(ep, rendered=True)
@@ -454,10 +459,10 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--episode-dir", required=True, type=Path)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, fn, help_text in (("layout", cmd_layout, "烧录版式"),
-                                ("annotate", cmd_annotate, "重生成标注"),
-                                ("render", cmd_render, "渲染动画"),
-                                ("assemble", cmd_assemble, "合成成片")):
+    for name, help_text in (("layout", "烧录版式"),
+                            ("annotate", "重生成标注"),
+                            ("render", "渲染动画"),
+                            ("assemble", "合成成片")):
         p = sub.add_parser(name, help=help_text)
         if name == "render":
             p.add_argument("--scene", help="单幕 scene-XX；缺省全部")
@@ -469,16 +474,11 @@ def main() -> int:
         if name == "assemble":
             p.add_argument("--fast", action="store_true",
                            help="快速模式：faster preset 或硬件加速，速度提升约30-40%（质量略降）")
-    parse_cmds = {name: fn for name, fn in (("layout", cmd_layout), ("annotate", cmd_annotate),
-                                            ("render", cmd_render), ("assemble", cmd_assemble))}
     args = ap.parse_args()
     ep = args.episode_dir.resolve()
-    if args.cmd == "all":
-        for name in ("layout", "annotate", "render", "assemble"):
-            print(f"===== {name.upper()} =====")
-            parse_cmds[name](ep, args)
-        return 0
-    return parse_cmds[args.cmd](ep, args)
+    dispatch = {"layout": cmd_layout, "annotate": cmd_annotate,
+                "render": cmd_render, "assemble": cmd_assemble}
+    return dispatch[args.cmd](ep, args)
 
 
 if __name__ == "__main__":

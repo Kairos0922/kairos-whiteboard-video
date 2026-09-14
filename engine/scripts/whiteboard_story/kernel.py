@@ -44,6 +44,9 @@ CLUSTER_DILATE = 18              # 对象聚类膨胀半径 px（连通域判定
 BRUSH_RADIUS = 3                 # 描画笔刷半径 px：沿骨架/填色路径复制原图像素时
                                 # 带刷宽落墨（修"鬼影后换图"：1px 骨架线是草稿感，
                                 # 刷宽 6px 与板图线宽一致，画的过程就是原图的样子）
+HAND_FOLLOW_RANGE = (0.08, 1.0)  # 手部显示位置单侧 lerp 系数范围（1.0=硬贴笔尖，
+                                # 越小手越"跟手缓动"，吸收骨架点列噪声抖动；
+                                # 参照 nikola hand-follow，只影响显示不影响落墨时序）
 FADE_IN_MS = 380                 # 幕首自上一幕板面淡入背景的时长（擦黑板式切幕）
 
 
@@ -250,6 +253,19 @@ def ease_in_out(t: float) -> float:
     return 0.5 - 0.5 * math.cos(math.pi * min(1.0, max(0.0, t)))
 
 
+def hand_follow_step(display: tuple[float, float], target: tuple[float, float],
+                     follow: float) -> tuple[float, float]:
+    """手部显示位置单侧 lerp：display += (target - display) × follow。
+
+    follow 钳制到 HAND_FOLLOW_RANGE：1.0 = 每帧硬贴笔尖（默认，观感与旧版一致）；
+    <1.0 做指数平滑，吸收骨架点列的逐像素噪声抖动（参照 nikola hand-follow）。
+    只平滑显示位置——落墨、时序、cursor 真值均不受影响。
+    """
+    f = min(HAND_FOLLOW_RANGE[1], max(HAND_FOLLOW_RANGE[0], follow))
+    return (display[0] + (target[0] - display[0]) * f,
+            display[1] + (target[1] - display[1]) * f)
+
+
 def _paint_points(canvas: np.ndarray, src: np.ndarray,
                   ys: np.ndarray, xs: np.ndarray,
                   r: int = BRUSH_RADIUS) -> None:
@@ -441,6 +457,30 @@ def _build_move_task(el: Element, op: dict, board: np.ndarray) -> Task:
     )
 
 
+def _slot_durations(slots: list[list], duration_ms: int) -> list[int]:
+    """子槽时长分配：√弧长比例 + 60ms 下限 + 撑爆等比压回。
+
+    √ 而非线性：填色槽的蛇形路径总弧长 ∝ 色块面积，线性比例下大色块
+    吃掉窗口大头、轮廓一闪而过（"big fill hogs the timeline"，
+    参照 whiteboard-animator/Kinoslide 的 √面积组件级权重）。√ 压缩让
+    轮廓多分时间、铺色收得快，观感接近真人「细描慢、铺色快」。只压槽间：
+    槽内笔画间仍按线性弧长（_schedule_group）保持恒定笔速。
+    """
+    weights = [math.sqrt(max(1e-6, sum(max(1e-6, float(c[-1]))
+                                       for _p, c, _ln in slot)))
+               for slot in slots]
+    total_w = sum(weights)
+    budget = max(60 * len(slots),
+                 duration_ms - SUB_WINDOW_GAP_MS * (len(slots) - 1))
+    durs = [max(60, int(budget * w / total_w)) if total_w else max(60, budget // len(slots))
+            for w in weights]
+    over = sum(durs) - budget
+    if over > 0:                       # 下限撑爆预算：等比压回，保证总长 ≤ 窗口
+        scale = budget / sum(durs)
+        durs = [max(45, int(d * scale)) for d in durs]
+    return durs
+
+
 def build_tasks(elements: list[Element], board: np.ndarray,
                 strokes_global: list[np.ndarray],
                 skeleton: np.ndarray | None = None) -> list[Task]:
@@ -509,16 +549,8 @@ def build_tasks(elements: list[Element], board: np.ndarray,
         # 区域严格串行：实际开始时间不早于前一个区域结束 + 间隙
         actual_start = max(el.start_ms, prev_end_ms + REGION_GAP_MS)
 
-        # 时间分配：各子槽按弧长比例分配，子槽间留 SUB_WINDOW_GAP_MS
-        total_len = sum(max(1e-6, float(c[-1])) for slot in slots for _p, c, _ln in slot)
-        budget = max(60 * len(slots),
-                     el.duration_ms - SUB_WINDOW_GAP_MS * (len(slots) - 1))
-        durs = [max(60, int(budget * sum(max(1e-6, float(c[-1])) for _p, c, _ln in slot) / total_len))
-                if total_len else max(60, budget // len(slots)) for slot in slots]
-        over = sum(durs) - budget
-        if over > 0:                       # 下限撑爆预算：等比压回，保证总长 ≤ 窗口
-            scale = budget / sum(durs)
-            durs = [max(45, int(d * scale)) for d in durs]
+        # 时间分配：各子槽按 √弧长比例（_slot_durations，槽间防大色块霸窗）
+        durs = _slot_durations(slots, el.duration_ms)
 
         t = actual_start
         for slot, dur in zip(slots, durs):
@@ -552,13 +584,15 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
                         hand_png: Path, fps: int = 30,
                         total_ms: int | None = None,
                         overlay_png: Path | None = None,
-                        fade_from_png: Path | None = None) -> Path:
+                        fade_from_png: Path | None = None,
+                        hand_follow: float = 1.0) -> Path:
     """单幕渲染入口：区域时序揭示 + 描线/填色 + 手部贴笔尖 → H.264 MP4。
 
     board_png = 内容原图（墨迹来源）；overlay_png = 版式 overlay（只含标签文字），
     其与原图的差集是 chrome：第 0 帧直接显现，不作为笔画参与揭示。
     fade_from_png = 上一幕的板面：幕首 FADE_IN_MS 内从它淡出到背景色，
     模拟"擦黑板"的自然切幕（替代硬切）。
+    hand_follow：手部显示位置缓动系数（见 hand_follow_step；默认 1.0 硬贴）。
     """
     board, _ink, skel = load_board_layers(board_png)
     if not board.flags.writeable:
@@ -667,6 +701,7 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
               if first_draw is not None else (w / 2.0, 60.0))
     step_px = TRAVEL_SPEED_PX_MS * 1000.0 / fps      # 空档滑行单帧步长
     hand_visible = True                                   # MOVE 操作期间手隐藏（物体自己在动）
+    display_pos = cursor                                  # 手部显示位置（hand_follow 平滑后）
 
     proc, _cmd = _open_ffmpeg_rawvideo_writer(Path(out_mp4), (w, h), fps)
     assert proc.stdin is not None
@@ -762,7 +797,9 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
 
             frame = Image.fromarray(canvas)
             if hand_visible:
-                frame.paste(hand_img, (int(cursor[0]) - tip[0], int(cursor[1]) - tip[1]), hand_img)
+                display_pos = hand_follow_step(display_pos, cursor, hand_follow)
+                frame.paste(hand_img, (int(display_pos[0]) - tip[0],
+                                       int(display_pos[1]) - tip[1]), hand_img)
             proc.stdin.write(frame.convert("RGB").tobytes())
     finally:
         proc.stdin.close()

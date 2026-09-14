@@ -300,5 +300,47 @@ class OpsSubwindowTest(unittest.TestCase):
                                      "对象应按阅读顺序（上→下）逐个完成")
 
 
+class SlotDurationTest(unittest.TestCase):
+    """子槽时长 √弧长权重（2026-09-11 吸收 whiteboard-animator 的
+    √面积组件级权重）：防大填色槽霸占窗口，槽内笔速不变。"""
+
+    @staticmethod
+    def _stroke(length: float):
+        pts = np.array([[0, 0], [int(length), 0]], dtype=np.int32)
+        cum = np.array([0.0, length])
+        return (pts, cum, length)
+
+    def test_fill_slot_compressed_vs_linear(self):
+        # 轮廓槽总弧长 400、填色槽（蛇形）总弧长 1667：
+        # 线性比例下填色占 80.6%；√ 压缩后应降到 ~67%
+        slots = [[self._stroke(200), self._stroke(200)],
+                 [self._stroke(400)] * 4]  # 4 x ~417 ≈ 1667
+        durs = K._slot_durations(slots, 4000)
+        budget = 4000 - K.SUB_WINDOW_GAP_MS
+        fill_share = durs[1] / budget
+        self.assertGreater(fill_share, 0.60, "√ 压缩不应把填色槽压得过扁")
+        self.assertLess(fill_share, 0.72, "填色槽占比应明显低于线性 80.6%")
+
+    def test_outline_slot_gains_time(self):
+        # 同场景轮廓槽：线性 19.4% → √ 后 ~33%
+        slots = [[self._stroke(200), self._stroke(200)],
+                 [self._stroke(400)] * 4]
+        durs = K._slot_durations(slots, 4000)
+        budget = 4000 - K.SUB_WINDOW_GAP_MS
+        outline_share = durs[0] / budget
+        self.assertGreater(outline_share, 0.28)
+
+    def test_single_slot_takes_full_budget(self):
+        durs = K._slot_durations([[self._stroke(500)]], 3000)
+        self.assertEqual([3000], durs)
+
+    def test_floor_compression_keeps_sum_within_budget(self):
+        slots = [[self._stroke(3000)], [self._stroke(3000)], [self._stroke(3000)]]
+        durs = K._slot_durations(slots, 200)
+        budget = max(60 * 3, 200)
+        self.assertGreaterEqual(min(durs), 45)
+        self.assertLessEqual(sum(durs), budget)
+
+
 if __name__ == "__main__":
     unittest.main()

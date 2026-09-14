@@ -22,4 +22,4 @@ dev = ["pytest>=8.0"]
 package = false
 
 [tool.uv.sources]
-whiteboard-video-engine = { git = "https://github.com/gnipbao/whiteboard-video-engine.git", rev = "31552154230340371d33c9235b297ba564298a1c" }
+whiteboard-video-engine = { git = "https://github.com/gnipbao/whiteboard-video-engine.git", rev = "86848ea27077c1902950bf4e7e37e02d4bfbd1a3" }

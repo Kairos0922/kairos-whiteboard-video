@@ -116,6 +116,28 @@ class IRLintGateTest(unittest.TestCase):
             json.dumps(legal_doc(), ensure_ascii=False), encoding="utf-8")
         self.assertEqual(cmd_lint(self.ep, self.args), 0)
 
+    def test_confirm_content_blocks_ir_contract_violations(self):
+        """第1次确认必须真的消费 lint 的阻断项：缺 IR 不得被确认（principles P5）。"""
+        from workflow import cmd_confirm_content, cmd_init
+        self.assertEqual(cmd_init(self.ep, "旧结构片", self.args), 0)
+        self._legacy_script()
+        self.assertEqual(cmd_confirm_content(self.ep, self.args), 3)
+        state = json.loads((self.ep / "state.json").read_text(encoding="utf-8"))
+        self.assertFalse(state["confirmations"]["content_confirmed"])
+        self.assertFalse(state["phases"]["express_card_filled"])
+
+    def test_confirm_content_sets_gate_flags_on_legal_ir(self):
+        from workflow import cmd_confirm_content, cmd_init
+        self.assertEqual(cmd_init(self.ep, "合规片", self.args), 0)
+        (self.ep / "input").mkdir(parents=True, exist_ok=True)
+        (self.ep / "input/script.json").write_text(
+            json.dumps(legal_doc(), ensure_ascii=False), encoding="utf-8")
+        self.assertEqual(cmd_confirm_content(self.ep, self.args), 0)
+        state = json.loads((self.ep / "state.json").read_text(encoding="utf-8"))
+        self.assertTrue(state["confirmations"]["content_confirmed"])
+        self.assertTrue(state["phases"]["express_card_filled"])
+        self.assertTrue(state["phases"]["script_audio_confirmed"])
+
 
 class CheckBoardTest(unittest.TestCase):
     def _img(self, w, h, bgr):

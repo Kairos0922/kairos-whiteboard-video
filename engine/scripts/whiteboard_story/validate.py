@@ -10,7 +10,12 @@
   4. annotations 覆盖所有幕（以 words.json scenes[] 为幕真值）；
   5. 口播指纹复核：与 state.json["voice_fingerprints"] 记录的三件套 sha256
      比对，不一致列明细并阻断（挂接约定见 providers/voice.py 模块注释；
-     尚无记录报 warning——从未确认过就谈不上「变了」）。
+     尚无记录报 warning——从未确认过就谈不上「变了」）；
+  6. words.json 词表质量（P2 对齐护栏，2026-09-13）：词表非空、时间单调不减、
+     词不越所属幕窗（±50ms 容差）、与脚本旁白归一化相似度 ≥0.70（<0.90 警告）；
+  7. 标注词级调度零降级（P2，2026-09-13）：三件套齐全时每幕标注必须
+     meta.schedule=words 且 matched=100% 且 meta.warnings 无对齐降级关键词
+     （均分/模糊匹配/无处安放/不足以/超出预留区）——SKILL.md「不得带降级进二审」。
 
 警告：
   a. 成片时长与旁白时长偏差 > 2s；
@@ -37,6 +42,20 @@ from providers.voice import FINGERPRINT_FILES, sha256_file  # noqa: E402
 
 FINAL_MP4 = Path("deliverables/final.mp4")
 MAX_DURATION_DRIFT_MS = 2000
+
+# ---- P2 对齐护栏（2026-09-13 吸收 survey §12：cs-board 覆盖率红线 + nikola 降级阶梯）----
+# words.json 是 P2 唯一时间源：乱序/越界/空表 = 时间源自相矛盾，阻断；
+# 词表与脚本旁白归一化相似度过低 = 词表与口播脱钩（挂错音频/改稿未重跑），按阈值分级。
+ALIGN_WARN_RATIO = 0.90
+ALIGN_BLOCK_RATIO = 0.70
+SCENE_BOUND_TOL_MS = 50
+# 标注 meta.warnings 中出现这些关键词 = 对齐降级（SKILL.md：不得带降级进二审）
+ALIGN_DEGRADE_KEYWORDS = ("均分", "模糊匹配", "无处安放", "不足以", "超出预留区")
+
+
+def _norm_for_alignment(text: str) -> str:
+    """对齐覆盖率用的归一化：只保留字母数字汉字，去空白与标点（TTS 可能改写标点）。"""
+    return "".join(ch for ch in (text or "") if ch.isalnum())
 
 
 def _ffprobe(path: Path, entries: str) -> str:
@@ -190,7 +209,7 @@ def validate(episode_dir: Path) -> tuple[list[str], list[str], dict]:
                         f"成片 {duration_ms}ms 与旁白 {narr_ms}ms 偏差 {drift}ms "
                         f"> {MAX_DURATION_DRIFT_MS}ms（画面/声音可能错位或截尾）")
 
-    # ---- 4. annotations 覆盖所有幕 ----
+    # ---- 4. annotations 覆盖所有幕 + 词级调度降级闸口 ----
     ann_missing: list[str] = []
     for sid in scene_ids:
         apath = ep / "build" / "annotations" / f"{sid}.annotation.json"
@@ -203,6 +222,29 @@ def validate(episode_dir: Path) -> tuple[list[str], list[str], dict]:
             if n_el == 0 or not ann.get("sceneDurationMs"):
                 blockers.append(f"{sid} 标注为空或缺 sceneDurationMs：{apath.name}")
                 ann_missing.append(sid)
+                continue
+            # 词级调度降级闸口（三件套齐全时标注必须是 words 调度且零降级）：
+            # SKILL.md「词级锚找不到退回区段均分是降级，出现即改 anchor 重跑，
+            # 不得带降级进二审（P2）」——交付前同样零容忍。
+            if trio["words.json"]:
+                meta = ann.get("meta") or {}
+                if meta.get("schedule") != "words":
+                    blockers.append(f"{sid} 标注非词级调度（meta.schedule="
+                                    f"{meta.get('schedule') or '缺失'}），违反 P2：重跑 annotate")
+                else:
+                    matched = str(meta.get("matched", ""))
+                    if "/" in matched:
+                        got, want = matched.split("/", 1)
+                        if got != want:
+                            blockers.append(
+                                f"{sid} 词级锚降级：matched={matched}"
+                                "（部分分区退回区内均分——改 script.json 短语后重跑 annotate）")
+                    hard = [w0 for w0 in (meta.get("warnings") or [])
+                            if any(k in str(w0) for k in ALIGN_DEGRADE_KEYWORDS)]
+                    if hard:
+                        blockers.append(
+                            f"{sid} 标注对齐降级 {len(hard)} 项（须改锚重跑，不带降级交付）："
+                            + "；".join(str(w0) for w0 in hard[:3]))
         except json.JSONDecodeError as e:
             blockers.append(f"{sid} 标注解析失败：{e}")
             ann_missing.append(sid)
@@ -252,6 +294,91 @@ def validate(episode_dir: Path) -> tuple[list[str], list[str], dict]:
             f"{voice_expected}（主题品牌声音应跨期一致；改声源请同步主题 voice 块"
             "并重跑 voice --force，按 §8 重算下游）")
     info["voice_identity"] = {"used": voice_used, "expected": voice_expected}
+
+    # ---- 5c. words.json 词表质量（P2 对齐护栏）----
+    # 单调性/越界/空表阻断：words.json 是唯一时间源，自相矛盾即不可交付；
+    # 覆盖率分级：词表文本与脚本旁白脱钩说明挂错音频或改稿未重跑三件套。
+    if trio["words.json"] and words_doc:
+        words_list = words_doc.get("words") or []
+        if not words_list:
+            blockers.append("input/words.json 词表为空（P2 无时间源，重跑 voice）")
+        else:
+            bad_entries = []
+            prev_start: int | None = None
+            for i, w in enumerate(words_list):
+                try:
+                    ws, we = int(w["start_ms"]), int(w["end_ms"])
+                except (KeyError, TypeError, ValueError):
+                    blockers.append(f"input/words.json 第 {i} 词条缺/坏 start_ms/end_ms")
+                    break
+                if we < ws:
+                    bad_entries.append(f"第 {i} 词「{w.get('text', '')}」时长为负")
+                    if len(bad_entries) >= 3:
+                        break
+                    continue
+                if prev_start is not None and ws < prev_start:
+                    blockers.append(
+                        f"input/words.json 词表时间乱序（第 {i} 词 start {ws}ms < 前词；"
+                        "词级时间戳必须单调不减）")
+                    break
+                prev_start = ws
+            blockers.extend(f"input/words.json {e}" for e in bad_entries)
+
+            # 词不越出所属幕窗口（±容差）：幕窗由词推导，越界 = 两处时间真值矛盾
+            scene_bounds: dict[int, tuple[int, int]] = {}
+            for s in words_doc.get("scenes", []):
+                try:
+                    scene_bounds[int(s["scene_index"])] = (int(s["start_ms"]), int(s["end_ms"]))
+                except (KeyError, TypeError, ValueError):
+                    blockers.append("input/words.json scenes 条目缺/坏 scene_index/start_ms/end_ms")
+                    break
+            if scene_bounds:
+                out_of_bound = []
+                for w in words_list:
+                    try:
+                        ws, we = int(w["start_ms"]), int(w["end_ms"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    b = scene_bounds.get(int(w.get("scene_index", 0)))
+                    if b and (ws < b[0] - SCENE_BOUND_TOL_MS or we > b[1] + SCENE_BOUND_TOL_MS):
+                        out_of_bound.append(f"「{w.get('text', '')}」({ws}-{we})")
+                        if len(out_of_bound) >= 3:
+                            break
+                if out_of_bound:
+                    blockers.append(
+                        "input/words.json 词条越出所属幕窗口："
+                        + "、".join(out_of_bound)
+                        + "（幕窗与词表矛盾，重跑 voice/attach_audio）")
+
+            if words_doc.get("granularity") == "sentence":
+                warnings.append(
+                    "words.json granularity=sentence：句级窗口是词级的降级形态"
+                    "（attach_audio 路径），词级锚与逐字字幕的对齐质量受限")
+
+            # 覆盖率：词表文本 vs 脚本旁白（归一化后序列相似度）
+            script_path = ep / "input" / "script.json"
+            if script_path.exists():
+                try:
+                    script_doc_align = json.loads(script_path.read_text(encoding="utf-8"))
+                    script_text = _norm_for_alignment("".join(
+                        sc.get("narration", "") for sc in script_doc_align.get("scenes", [])))
+                    words_text = _norm_for_alignment("".join(
+                        str(w.get("text", "")) for w in words_list))
+                    if script_text and words_text:
+                        from difflib import SequenceMatcher
+                        ratio = SequenceMatcher(None, script_text, words_text).ratio()
+                        info["alignment_coverage"] = round(ratio, 4)
+                        if ratio < ALIGN_BLOCK_RATIO:
+                            blockers.append(
+                                f"words.json 词表与脚本旁白相似度 {ratio:.2f} < "
+                                f"{ALIGN_BLOCK_RATIO}（词表与口播脱钩：挂错音频或改稿未重跑 voice）")
+                        elif ratio < ALIGN_WARN_RATIO:
+                            warnings.append(
+                                f"words.json 词表与脚本旁白相似度 {ratio:.2f} < "
+                                f"{ALIGN_WARN_RATIO}（TTS 对数字/标点的改写属正常，"
+                                "过低请核对是否同一稿）")
+                except (json.JSONDecodeError, OSError) as e:
+                    warnings.append(f"对齐覆盖率检查跳过（script.json 解析失败）：{e}")
 
     # ---- 警告 b：底部字幕带亮度冲突（收编 review_images.check_board）----
     layout_dir = ep / "build" / "boards-layout"

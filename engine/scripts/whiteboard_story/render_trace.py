@@ -20,8 +20,10 @@ def render_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
                  board_style: str = "paper", fps: int = 30,
                  cap_long_edge: int = 1920, ink_path: str = "skeleton",
                  overlay_png: Path | None = None,
-                 fade_from_png: Path | None = None) -> Path:
+                 fade_from_png: Path | None = None,
+                 hand_follow: float = 1.0) -> Path:
     """单幕渲染；成功返回输出路径，失败抛显式异常。"""
     return render_region_scene(Path(board_png), Path(annotation_json), Path(out_mp4),
                                Path(hand_png), fps=fps, total_ms=total_ms,
-                               overlay_png=overlay_png, fade_from_png=fade_from_png)
+                               overlay_png=overlay_png, fade_from_png=fade_from_png,
+                               hand_follow=hand_follow)

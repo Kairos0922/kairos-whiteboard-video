@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -344,7 +344,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "opencv-python-headless", specifier = ">=4.8" },
     { name = "pillow", specifier = ">=10.0" },
-    { name = "whiteboard-video-engine", git = "https://github.com/gnipbao/whiteboard-video-engine.git?rev=31552154230340371d33c9235b297ba564298a1c" },
+    { name = "whiteboard-video-engine", git = "https://github.com/gnipbao/whiteboard-video-engine.git?rev=86848ea27077c1902950bf4e7e37e02d4bfbd1a3" },
 ]
 
 [package.metadata.requires-dev]
@@ -1034,7 +1034,7 @@ wheels = [
 [[package]]
 name = "whiteboard-video-engine"
 version = "0.1.0"
-source = { git = "https://github.com/gnipbao/whiteboard-video-engine.git?rev=31552154230340371d33c9235b297ba564298a1c#31552154230340371d33c9235b297ba564298a1c" }
+source = { git = "https://github.com/gnipbao/whiteboard-video-engine.git?rev=86848ea27077c1902950bf4e7e37e02d4bfbd1a3#86848ea27077c1902950bf4e7e37e02d4bfbd1a3" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },

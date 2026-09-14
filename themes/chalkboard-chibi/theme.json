@@ -11,10 +11,10 @@
     "status": "frozen"
   },
   "palette": {
-    "board": "#123D35",
-    "chalk": "#E8DFC9",
-    "risk_and_questions": "#CF7B70",
-    "discovery": "#C6A55C"
+    "board": "#153A32",
+    "chalk": "#E5D8BC",
+    "risk_and_questions": "#D87B70",
+    "discovery": "#D9B44B"
   },
   "hands": [
     {

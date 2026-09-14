@@ -59,7 +59,14 @@ metadata:
   ```
 
 - `workflow.py` 命令：init / status / sync-boards / voice / confirm-voice / prompts / probe /
-  lint / spans / import / confirm-boards / render / validate。关键参数：`init --title <标题> [--scenes N]`
+  lint / spans / import / **confirm-content / confirm-visual / confirm-final** /
+  confirm-boards（旧）/ render / validate。
+  **三次确认（质量门）的 flag 只能由这三个 confirm-* 命令写**，不要手改 `state.json`：
+  `confirm-content`（闸：script.json 存在 + lint 零阻断 → `content_confirmed`）、
+  `confirm-visual`（闸：全部板图检查 ok + `annotated` → `visual_confirmed`/`boards_reviewed`）、
+  `confirm-final`（闸：deliverables/final.mp4 存在 → `final_confirmed`）；任一闸门不过返回码 3。
+  `confirm-boards` 是旧流程别名（同写第2次确认，但不查 `annotated`），新期次一律用 `confirm-visual`。
+  关键参数：`init --title <标题> [--scenes N]`
   （init 不吃主题）；`prompts --theme <主题目录> [--scene id]`；`import --boards-dir <目录> [--theme]`
   （自动清右下角平台水印；chalk 主题按板底色查四角）；`voice [--voice NAME --rate X --force]`；
   `probe --theme <主题目录>`；`spans` 派生句级 narration_spans 写回 words.json。
@@ -87,6 +94,13 @@ metadata:
   （`elements[i].id = "panel-(i+1)"`）；不等 → 标注器降级均分并打 warning，**warning = 不合格**。
 - 词级锚找不到才退回区段均分，这是**降级**：出现即改 anchor 重跑，不得带降级进二审（P2）。
 - 板图不带可读文字；编号与标签一律由 `layout.json` 的 `texts[]` 叠加。
+- 生图服务常输出 16:9 小图（如 1200×675）或 16:9 家族的档位（如 1792×1024=1.75）：
+  `import` 对比例差 ≤0.03 的板图先**居中裁**到精确 16:9（过宽裁左右、过高裁上下，只动
+  边缘余量——构图纪律本就要求四周留白、底部 1/5 空）再等比缩放到 1920×1080；
+  **不做非等比拉伸**（那会畸变板面几何）。比例差超带仍阻断。裁切发生时 `import` 打印
+  中间尺寸。不需要单独确认，缩放对描线渲染无损。
+- 文字检测只是辅助（warning 不阻断）：均匀深板上对亮色前景不敏感，字形级且
+  间距均匀的图标行可能误报；二审按返回的行坐标放大复核，最终靠人工把关。
 - `voice --force` 可覆盖已生成音频，但 confirm 之后改口播必须重置指纹、重新试听。
 - 板图是内容、版式层是 chrome：渲染吃 `build/boards-layout/<id>.raw.png`（内容原图），
   overlay 只叠标签文字；**分区框/编号圈只在 `<id>.preview.png`（二审预览），不进成片**；
@@ -140,7 +154,8 @@ metadata:
 - 整体确认 → 进入第2次确认
 - 局部修改 → 指出哪部分需要修改（大纲/脚本/主题/Scene分组），AI 只重生成那部分，再次确认
 
-**状态标志**：`content_confirmed=true`、`express_card_filled=true`、`script_confirmed=true`
+**状态标志**（由 `workflow.py confirm-content` 写入）：`content_confirmed=true`、
+`express_card_filled=true`、`script_audio_confirmed=true`（脚本确认即音频内容确认）
 
 **完成判据**：卡八块齐全 + 终图 = 末 Beat 累计 delta + 每幕分区 2 至 4 且 ≥ 本幕 reveal 动作数 +
 零领先违规 + lint 通过 + 用户确认脚本内容与主题。
@@ -157,7 +172,8 @@ metadata:
 2. **批量生成全部场景图 prompt**：`workflow.py prompts --theme <主题目录路径>` 打出所有幕的
    板图 prompt（词表）。
 3. **批量生成全部场景图**：宿主模型一次性生成所有幕的 1920×1080 PNG，存 `build/boards/<id>.png`。
-   **不搞"一次一张报批"**，全部批量生成后批量确认。
+   **不搞"一次一张报批"**，全部批量生成后批量确认。宿主没有精确 16:9 档位时，
+   交 16:9 家族尺寸（如 1792×1024）给 `import` 自动裁放，**不要自己预先缩放或拉伸**。
 4. **导入与清水印**：`workflow.py import --boards-dir projects/<ep-id>/build/boards`
    （自动清右下角平台水印；chalk 主题按板底色查四角）。
 5. **自动分区与标注**：写 `input/layout.json`（panels 与 `elements[]` 数量一一对应），
@@ -170,7 +186,8 @@ metadata:
 - 批量确认 → 进入第3次确认
 - 单张修改 → 指出哪张场景图需要修改，AI 只重生成那张（重新 import→layout→annotate），再次确认
 
-**状态标志**：`visual_confirmed=true`、`boards_reviewed=true`、`annotated=true`
+**状态标志**（用户确认后由 `workflow.py confirm-visual` 写入）：`visual_confirmed=true`、
+`boards_reviewed=true`、`annotated=true`
 
 **完成判据**：每幕一张且 check_board 全 ok + 每幕 matched、零降级 warning（warning = 不合格）+
 用户确认全部场景图视觉效果。
@@ -188,6 +205,7 @@ metadata:
    7 幕约 1 分钟）。
 3. **合成**：`build_video.py … assemble`（音画合成 + 词级 ASS 字幕卡拉OK逐字高亮）。
 4. **验证**：`workflow.py validate`（零阻断）。
+5. **落标志**：用户确认最终产物后跑 `workflow.py confirm-final`。
 
 **产出**：最终视频 `deliverables/final.mp4`。
 
@@ -196,7 +214,7 @@ metadata:
 - 需要修改 → 指出问题，AI 定位到对应环节（内容→回第1次确认 / 视觉→回第2次确认 /
   渲染参数→直接重渲染）修改后重新生成
 
-**状态标志**：`final_confirmed=true`
+**状态标志**（用户确认后由 `workflow.py confirm-final` 写入）：`final_confirmed=true`
 
 **完成判据**：validate 报告零阻断 + 视频可正常播放（1920×1080@30fps、音画同步、字幕对齐）+
 用户确认最终产物。
@@ -225,6 +243,7 @@ metadata:
 ## 分支指针（何时读哪份）
 
 - 判选题适用性、或 Beat 切分 / 揭示时序 / 旁白判据起争议 → [references/whiteboard-video-principles.md](references/whiteboard-video-principles.md)（第一性原理与 AI 味判据）
+- 调研同类白板渲染引擎、找参照实现或反例警示 → [references/survey-whiteboard-render-engines.md](references/survey-whiteboard-render-engines.md)（2026-09 GitHub 全方向扫描）
 - 用户路径第 1 步：填知识语义 IR、决定砍什么 → [references/knowledge-model.md](references/knowledge-model.md)
 - 第 2 步：约束求解、Transition 规划、Merge/Split Test 定 Beat 数 → [references/learner-model.md](references/learner-model.md)
 - 第 3 步：怎么说 / 怎么画 / 何时揭示、元素职责、非法操作改写 → [references/expression-plan.md](references/expression-plan.md)

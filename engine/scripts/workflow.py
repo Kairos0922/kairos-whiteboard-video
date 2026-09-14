@@ -2,26 +2,37 @@
 """白板叙事引擎入口。确定性操作都从这里进。
 
 用法：
-  python workflow.py init           --episode-dir <dir> --title <title> [--scenes N]
-  python workflow.py status         --episode-dir <dir>
-  python workflow.py sync-boards    --episode-dir <dir>
-      # 按 input/script.json 的幕数重写 state.boards（幕数跟脚本走）
-  python workflow.py voice          --episode-dir <dir> [--script <file>] [--voice NAME]
-                                    [--rate X] [--force]
-  python workflow.py confirm-voice  --episode-dir <dir>
-  python workflow.py prompts        --episode-dir <dir> --theme <theme-dir> [--scene id]
-      # 打出宿主模型要用的板图 prompt（不生图）。一次一张报批后再让宿主出 PNG。
-  python workflow.py probe          --theme <theme-dir>
+  python workflow.py init            --episode-dir <dir> --title <title> [--scenes N]
+  python workflow.py status          --episode-dir <dir>
+  python workflow.py sync-boards     --episode-dir <dir>
+      # 按 input/script.json 的幕数重写 state.boards（幕数跟脚本走）；先跑 lint，缺 IR 即阻断
+  python workflow.py voice           --episode-dir <dir> [--script <file>] [--voice NAME]
+                                     [--rate X] [--theme <theme-dir>] [--force]
+  python workflow.py confirm-voice   --episode-dir <dir>
+  python workflow.py prompts         --episode-dir <dir> --theme <theme-dir> [--scene id]
+      # 打出宿主模型要用的板图 prompt（不生图）。全部幕一次性批量出图、批量确认。
+  python workflow.py probe           --theme <theme-dir>
       # 主题探针 prompt。验证画风用；探针图为临时产物，不入主题包。
-  python workflow.py lint           --episode-dir <dir>
+  python workflow.py lint            --episode-dir <dir>
       # 编译器 IR 静态校验：knowledge_model / learner_model(transitions) / beats(reveal 操作、
       # 通道分配、元素职责) + P5「Beat 数 = 转变数」。有阻断项退出码 1。
-  python workflow.py spans          --episode-dir <dir>
+  python workflow.py spans           --episode-dir <dir>
       # 派生 narration_spans（句级边界自 words.json 词单元匹配），幂等写回 words.json。
-  python workflow.py import         --episode-dir <dir> --boards-dir <dir>
-  python workflow.py confirm-boards --episode-dir <dir>
-  python workflow.py render         --episode-dir <dir>
-  python workflow.py validate       --episode-dir <dir>
+  python workflow.py import          --episode-dir <dir> --boards-dir <dir> [--theme <theme-dir>]
+      # 比例正确的板图等比缩放到 1920×1080，清右下角水印，逐张 check_board
+  python workflow.py render          --episode-dir <dir>   # 闸门：boards_reviewed
+  python workflow.py validate        --episode-dir <dir>
+      # 交付前闸门（whiteboard_story/validate.py），有阻断项退出码 1
+
+三次确认（质量门）——state.json.confirmations 的唯一写入口，按顺序过：
+  python workflow.py confirm-content --episode-dir <dir>
+      # 第1次：内容与方向。script.json 存在且 lint 零阻断才放行；
+      # 同步置 express_card_filled / script_audio_confirmed（脚本确认即音频内容确认）
+  python workflow.py confirm-visual  --episode-dir <dir>
+      # 第2次：视觉方案。全部板图自动检查 ok 且 annotated=true 才放行；同步置 boards_reviewed
+  python workflow.py confirm-final   --episode-dir <dir>
+      # 第3次：最终产物。deliverables/final.mp4 存在才放行；同步置 finalized
+  # 旧命令 confirm-boards 等价于 confirm-visual（不含 annotated 检查），保留兼容旧期次。
 """
 from __future__ import annotations
 
@@ -544,6 +555,15 @@ def cmd_import(episode_dir: Path, args) -> int:
             all_ok = False
             print(f"✗ {b['scene']}: 缺 {f.name}")
             continue
+        norm = review_images.normalize_board_size(f)
+        if norm.get("scaled"):
+            ow, oh = norm["size"]
+            if norm.get("cropped"):
+                cw, ch = norm["cropped"]
+                print(f"  · {b['scene']}: {ow}x{oh} → 居中裁 {cw}x{ch} → 1920x1080"
+                      f"（比例非精确 16:9，已裁边等比放大）")
+            else:
+                print(f"  · {b['scene']}: {ow}x{oh} → 1920x1080（自动等比缩放）")
         wm_result = review_images.strip_watermark(f)
         if wm_result.get("detected"):
             if wm_result.get("removed"):
@@ -616,15 +636,17 @@ def cmd_confirm_content(episode_dir: Path, args) -> int:
     if not script_path.exists():
         print("闸门：input/script.json 不存在，不确认")
         return 3
-    # 跑 lint 检查 IR 契约
+    # 跑 lint 检查 IR 契约（阻断项非空即拒绝：缺 IR = Beat 数回到临场发挥，principles P5）
     try:
-        ir_contract.lint_episode(episode_dir)
-    except SystemExit as e:
-        if e.code != 0:
-            print("闸门：lint 未通过，不确认")
-            return 3
+        findings = ir_contract.lint_episode(episode_dir)
     except Exception as e:
         print(f"闸门：lint 执行失败（{e}），不确认")
+        return 3
+    blockers = [f for f in findings if f.severity == "blocking"]
+    if blockers:
+        print(f"闸门：lint 有 {len(blockers)} 项阻断，不确认")
+        for f in blockers:
+            print(f"  ✗ {f.code}  {f.message}")
         return 3
     conf = state.setdefault("confirmations", {})
     conf["content_confirmed"] = True

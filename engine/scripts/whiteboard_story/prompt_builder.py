@@ -24,7 +24,9 @@ def build_scene_payload(scene_id: str, subject: str, theme_dir: Path) -> dict:
         raise ValueError(f"{scene_id} 缺 board_subject")
     prompt = (f"{load_style_block(theme_dir)}\n{subject}\n"
               "画面里不要出现可读文字、字母、数字、品牌标识或水印；"
-              "允许无文字的箭头、气泡、曲线、节点、人物图标和图示。")
+              "不要画从画面边缘伸入的手臂或持笔、持粉笔的手部特写；"
+              "允许无文字的箭头、气泡、曲线、节点、人物图标和图示，"
+              "画面里人物自身的面部和手部正常表现即可。")
     return {
         "scene": scene_id,
         "prompt": prompt,

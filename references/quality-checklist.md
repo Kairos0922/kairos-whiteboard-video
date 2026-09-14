@@ -73,6 +73,22 @@
 - [ ] boards_reviewed=true 且 annotated=true
 - [ ] 手笔：PNG alpha，笔尖锚点已校准，路径是当期 assets 或 --hand
 
+## 语音对齐护栏（validate 自动查，2026-09-13 增）
+
+> P2 红线的机器闸口；阈值与降级关键词见 `validate.py` 模块注释。
+> 外部同行的同源红线（cs-board「不得悄悄退回按字数估算」、nikola「词时间不可靠
+> 就用完整句字幕，不伪造逐字卡点」）见 `survey-whiteboard-render-engines.md` §0.3。
+
+- [ ] words.json 词表非空、时间单调不减、词不越所属幕窗（±50ms 容差）——违反即阻断
+- [ ] 词表文本与 script.json 旁白归一化相似度 ≥0.90（<0.70 阻断，0.70–0.90 警告；
+      TTS 对数字/标点的改写属正常，过低先怀疑挂错音频或改稿未重跑 voice）
+- [ ] granularity=word（sentence 是 attach_audio 的降级形态，validate 会警告）
+- [ ] 每幕标注 meta.schedule=words 且 matched=100%（validate 阻断「词级锚降级」）
+- [ ] meta.warnings 无对齐降级关键词（均分/模糊匹配/无处安放/不足以/超出预留区）；
+      出现即改 script.json 短语重跑 annotate，不带降级进二审（SKILL.md 铁律）
+- [ ] 词时间不可靠时的合法降级阶梯：词级 → 强制对齐 → 句级字幕（不用伪词级）；
+      用了哪一级要在报告中显式登记，不静默回退
+
 ## 成片终审
 
 - [ ] 笔迹流畅、手部贴线、无跳帧；首帧干净
