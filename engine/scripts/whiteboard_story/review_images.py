@@ -264,18 +264,27 @@ def _detect_text_regions(gray: np.ndarray, h: int, w: int) -> dict:
 # 且判墨会把水印当墨迹画出来，import 前必须清除。
 # 三层防御：多区域检测 → 纯色背景填充 → 清除后验证
 WM_REGIONS = [
-    # (x0_ratio, y0_ratio, x1_ratio, y1_ratio) — 检测角落最一小块
-    # AI生成水印可能在左上角或右下角，通常只占最角落的 15%宽 × 8%高
-    # 区域足够小，确保是纯背景，不会包含板图实际内容
-    (0.0, 0.0, 0.18, 0.10),    # 左上角
-    (0.82, 0.92, 1.0, 1.0),    # 右下角
+    # (x0_ratio, y0_ratio, x1_ratio, y1_ratio) — 水印搜索带。带取得比字形框宽松，
+    # 因为判定靠字形形状（_watermark_glyphs），不靠面积占比。
+    (0.0, 0.0, 0.34, 0.14),    # 左上
+    (0.66, 0.86, 1.0, 1.0),    # 右下
 ]
 WM_DIST = 45                          # 与局部背景色的三通道和差下限（半透明水印约30-60）
-WM_MIN_PIXEL_RATIO = 0.002           # 检测到水印的最小像素占比（0.2%）
-WM_MIN_PIXEL_COUNT = 30               # 检测到水印的最小绝对像素数（双重判断，满足任一即可）
-WM_MAX_PIXEL_RATIO = 0.05             # 安全上限：非背景像素占比>5%说明是实际内容，跳过
-WM_RESIDUAL_THRESHOLD = 0.003        # 清除后残留率阈值（超过则清除失败）
-WM_BG_SAMPLE_MARGIN = 10             # 背景色采样边缘宽度（像素）
+WM_RESIDUAL_THRESHOLD = 0.010         # 清除后残留水印对比度像素占比阈值（超过则判清除失败）
+WM_BG_SAMPLE_MARGIN = 10              # 背景色采样边缘宽度（像素）
+# 字形形状判据（1920x1080 基准，带内像素计）
+WM_GLYPH_MIN_H = 8                    # 字高下限：低于此的是粉笔噪点
+WM_GLYPH_MAX_H = 70                   # 字高上限：高于此的是板图内容（人物、色块）
+WM_GLYPH_MIN_W = 4
+WM_GLYPH_MAX_W = 90                   # 字宽上限：长条是描线，不是字
+WM_GLYPH_MIN_AREA = 25
+WM_GLYPH_MAX_ASPECT = 3.0             # 单字宽/高上限
+WM_GLYPH_MAX_DIST = 140               # 字形平均对比度上限：半透明角标 60-100，亮色粉笔描线 170-230（换不透明亮水印需上调此值）
+WM_GLYPH_BASELINE = 45                # 一排字的垂直中心散布上限（超出=不是一行字）
+WM_GLYPH_MIN_SPAN = 60                # 横向铺开宽度下限
+WM_MIN_GLYPHS = 4                     # 少于四个字形不认为是水印
+WM_GLYPH_MAX_COVER = 0.30             # 字形总占比上限：超过说明抓到的是内容，整带放过
+WM_FILL_DILATE = 5                    # 填充框向外扩张的像素，盖住半透明边缘
 
 
 def _sample_background(img: np.ndarray, x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
@@ -307,11 +316,69 @@ def _watermark_mask(roi: np.ndarray, bg_color: np.ndarray) -> np.ndarray:
     return (dist > WM_DIST).astype(np.uint8) * 255
 
 
-def strip_watermark(path: Path) -> dict:
-    """清除板图水印：多区域检测 + 纯色背景填充 + 清除后验证。
+def _band_dist(roi: np.ndarray, bg_color: np.ndarray) -> np.ndarray:
+    """带内每个像素与局部背景色的三通道和差（半透明水印约 60-100，粉笔描线 170+）。"""
+    return np.abs(roi.astype(np.int16) - bg_color).sum(axis=2)
 
-    对每个检测区域：采样区域外背景色 → 生成水印 mask → 用背景色填充 mask →
-    全部区域处理完后重新检测计算残留率。
+
+def _watermark_glyphs(dist: np.ndarray) -> list[tuple[int, int, int, int]]:
+    """从带内对比度图里挑出水印那一行"小字"，返回 (x, y, w, h) 列表；不像字则返回空。
+
+    判据是形状＋对比度，不是面积占比：本宿主的角标字大，非背景像素占比约 10%，
+    撞上旧版"占比>5% 即视为内容"的安全上限被整块跳过，六张带水印板图静默通过。
+    反过来，右下角的真实内容（人物、色块、被带边切到的描线段）会混进候选，
+    所以再按基线聚行取最像一行字的那组，并用对比度上限把亮粉笔描线挡在外面。
+    """
+    mask = (dist > WM_DIST).astype(np.uint8) * 255
+    merged = cv2.dilate(mask, np.ones((3, 3), np.uint8))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(merged, 8)
+    cands = []
+    for i in range(1, n):
+        x, y, bw, bh, area = (int(v) for v in stats[i])
+        if not (WM_GLYPH_MIN_H <= bh <= WM_GLYPH_MAX_H):
+            continue
+        if not (WM_GLYPH_MIN_W <= bw <= WM_GLYPH_MAX_W):
+            continue
+        if area < WM_GLYPH_MIN_AREA or bw / max(bh, 1) > WM_GLYPH_MAX_ASPECT:
+            continue
+        if float(dist[labels == i].mean()) > WM_GLYPH_MAX_DIST:
+            continue
+        cands.append((x, y, bw, bh))
+    rows: list[list[tuple[int, int, int, int]]] = []
+    for g in sorted(cands, key=lambda b: b[1] + b[3] / 2):
+        cy = g[1] + g[3] / 2
+        head = rows[-1][0] if rows else None
+        if head is not None and abs(cy - (head[1] + head[3] / 2)) <= WM_GLYPH_BASELINE:
+            rows[-1].append(g)
+        else:
+            rows.append([g])
+    best: list[tuple[int, int, int, int]] = []
+    for row in rows:
+        if len(row) > len(best) and _row_is_text(row, dist.size):
+            best = row
+    return sorted(best, key=lambda b: b[0])
+
+
+def _row_is_text(row: list[tuple[int, int, int, int]], band_pixels: int) -> bool:
+    """一横排候选够不够构成一行水印字：数量、横向铺开、总占比三道。"""
+    if len(row) < WM_MIN_GLYPHS:
+        return False
+    if sum(b[2] * b[3] for b in row) > WM_GLYPH_MAX_COVER * band_pixels:
+        return False
+    span = max(b[0] + b[2] for b in row) - min(b[0] for b in row)
+    return span >= WM_GLYPH_MIN_SPAN
+
+
+def _band_box(band, w: int, h: int):
+    rx0, ry0, rx1, ry1 = band
+    return int(w * rx0), int(h * ry0), int(w * rx1), int(h * ry1)
+
+
+def strip_watermark(path: Path) -> dict:
+    """清除板图角落水印：按字形定位 → 只填字形外接框 → 复查重算残留。
+
+    只填外接框而不是整个角落区域：右下角常有真实内容（如睡着的孩子），
+    整区填充会连内容一起抹掉。
 
     返回 {"detected", "removed", "regions", "residual_ratio"}。
     removed=False 时不修改原文件，调用方应报错阻止 import。
@@ -322,57 +389,54 @@ def strip_watermark(path: Path) -> dict:
                 "error": f"无法读取图片：{path}"}
     h, w = img.shape[:2]
     detected_regions = []
-    any_detected = False
+    checked: list[tuple[int, int, int, int, np.ndarray]] = []
+    fill = np.zeros((h, w), np.uint8)
+    d = WM_FILL_DILATE
 
-    for (rx0, ry0, rx1, ry1) in WM_REGIONS:
-        x0, y0 = int(w * rx0), int(h * ry0)
-        x1, y1 = int(w * rx1), int(h * ry1)
+    for band in WM_REGIONS:
+        x0, y0, x1, y1 = _band_box(band, w, h)
         if x1 <= x0 or y1 <= y0:
             continue
-        roi = img[y0:y1, x0:x1]
-        bg_color = _sample_background(img, x0, y0, x1, y1)
-        mask = _watermark_mask(roi, bg_color)
-        pixel_ratio = float((mask > 0).mean())
-        pixel_count = int((mask > 0).sum())
-        # 安全上限：非背景像素占比太高说明是实际内容，不是水印，跳过
-        if pixel_ratio > WM_MAX_PIXEL_RATIO:
+        bg = _sample_background(img, x0, y0, x1, y1)
+        glyphs = _watermark_glyphs(_band_dist(img[y0:y1, x0:x1], bg))
+        if not glyphs:
             continue
-        if pixel_ratio < WM_MIN_PIXEL_RATIO and pixel_count < WM_MIN_PIXEL_COUNT:
-            continue
-        any_detected = True
+        gx0 = min(x0 + g[0] for g in glyphs)
+        gy0 = min(y0 + g[1] for g in glyphs)
+        gx1 = max(x0 + g[0] + g[2] for g in glyphs)
+        gy1 = max(y0 + g[1] + g[3] for g in glyphs)
         detected_regions.append({
-            "region": [rx0, ry0, rx1, ry1],
-            "pixel_ratio": round(pixel_ratio, 4),
-            "pixel_count": pixel_count,
-            "bg_color": [int(c) for c in bg_color],
+            "region": [round(v, 4) for v in band],
+            "glyph_count": len(glyphs),
+            "bbox": [gx0, gy0, gx1, gy1],
+            "bg_color": [int(c) for c in bg],
         })
-        # 检测到水印后，直接填充整个检测区域为背景色。
-        # 白板/黑板场景的角落为纯色背景，无实际内容；整区填充比mask膨胀更彻底，
-        # 能覆盖差<阈值的半透明边缘，避免淡痕残留。
-        roi[:] = bg_color.astype(np.uint8)
-        img[y0:y1, x0:x1] = roi
+        checked.append((gx0, gy0, gx1, gy1, bg))
+        for gx, gy, gw, gh in glyphs:
+            fy0, fy1 = max(0, y0 + gy - d), min(h, y0 + gy + gh + d)
+            fx0, fx1 = max(0, x0 + gx - d), min(w, x0 + gx + gw + d)
+            fill[fy0:fy1, fx0:fx1] = 255
 
-    if not any_detected:
+    if not detected_regions:
         return {"detected": False, "removed": False, "regions": [], "residual_ratio": 0.0}
 
-    # 第三层：清除后验证 — 重新检测所有区域，计算残留率
+    cleaned = cv2.inpaint(img, fill, d, cv2.INPAINT_TELEA)
+    # 残留只看"填过的那一块里还剩多少水印对比度的像素"：
+    # 不能只数成行的字（漏掉的字母常只剩两三个，形状判据过不了却确实留在板上），
+    # 也不能数全部非背景像素（穿过角标的板框描线是内容，不是残留）。
     total_residual = 0
     total_pixels = 0
-    for (rx0, ry0, rx1, ry1) in WM_REGIONS:
-        x0, y0 = int(w * rx0), int(h * ry0)
-        x1, y1 = int(w * rx1), int(h * ry1)
-        if x1 <= x0 or y1 <= y0:
-            continue
-        roi = img[y0:y1, x0:x1]
-        bg_color = _sample_background(img, x0, y0, x1, y1)
-        mask = _watermark_mask(roi, bg_color)
-        total_residual += int((mask > 0).sum())
-        total_pixels += roi.shape[0] * roi.shape[1]
+    for gx0, gy0, gx1, gy1, bg in checked:
+        bx0, by0 = max(0, gx0 - d), max(0, gy0 - d)
+        bx1, by1 = min(w, gx1 + d), min(h, gy1 + d)
+        dist = _band_dist(cleaned[by0:by1, bx0:bx1], bg)
+        total_residual += int(((dist > WM_DIST) & (dist <= WM_GLYPH_MAX_DIST)).sum())
+        total_pixels += (by1 - by0) * (bx1 - bx0)
     residual_ratio = total_residual / max(total_pixels, 1)
     removed = residual_ratio < WM_RESIDUAL_THRESHOLD
 
     if removed:
-        cv2.imwrite(str(path), img)
+        cv2.imwrite(str(path), cleaned)
 
     return {
         "detected": True,

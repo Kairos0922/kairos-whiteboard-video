@@ -75,6 +75,29 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(by_scene["scene-02"]["status"], "failed")
         self.assertFalse(state["phases"]["boards_reviewed"])
 
+    def test_import_from_build_boards_in_place(self):
+        """--boards-dir 就是 build/boards（SKILL 文档用法）时不能自复制崩溃。"""
+        import cv2
+        import numpy as np
+
+        self.assertEqual(cmd_init(self.ep, "测试片", self.args), 0)
+        (self.ep / "input/script.json").write_text(
+            json.dumps(legal_doc(("scene-01",)), ensure_ascii=False), encoding="utf-8")
+        from workflow import cmd_sync_boards
+        self.assertEqual(cmd_sync_boards(self.ep, self.args), 0)
+        boards = self.ep / "build" / "boards"
+        boards.mkdir(parents=True, exist_ok=True)
+        good = np.zeros((1080, 1920, 3), np.uint8)
+        good[:] = (235, 242, 245)  # 暖白纸面：合法板图
+        for i in range(24):
+            cv2.line(good, (300, 80 + i * 40), (1500, 80 + i * 40), (60, 60, 60), 2)
+        cv2.imwrite(str(boards / "scene-01.png"), good)
+        self.args.boards_dir = str(boards)
+        self.assertEqual(cmd_import(self.ep, self.args), 0)
+        state = json.loads((self.ep / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["boards"][0]["status"], "ok")
+        self.assertTrue((boards / "scene-01.png").exists())
+
 
 class IRLintGateTest(unittest.TestCase):
     """旧式 script.json（只有幕 + 旁白 + 分区）不再能进现场阶段：文档层不再是真相源。"""

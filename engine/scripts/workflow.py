@@ -594,6 +594,8 @@ def cmd_import(episode_dir: Path, args) -> int:
             build_boards_dir.mkdir(parents=True, exist_ok=True)
             dest = build_boards_dir / f"{b['scene']}.png"
             import shutil
+            if dest.exists() and dest.samefile(f):
+                continue  # --boards-dir 就是 build/boards，板图已在原位
             shutil.copy2(f, dest)
             print(f"  → 已复制到 build/boards/{b['scene']}.png")
     state["phases"]["boards_generated"] = all_ok

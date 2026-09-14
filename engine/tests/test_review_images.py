@@ -205,5 +205,65 @@ class PromptBuilderGuardTest(unittest.TestCase):
             self.assertIn("a board scene", payload["prompt"])
 
 
+class StripWatermarkTest(unittest.TestCase):
+    """角标水印：判据必须是字形形状＋低对比度，不是面积占比。
+
+    回归自一期实盘：宿主在右下角打 "Qoder AI生成"，非背景像素占比约 10%，
+    撞上旧版"占比>5% 即视为内容"的安全上限被整块跳过，六张带水印板图静默通过 import。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "scene-01.png"
+        self.board = np.zeros((1080, 1920, 3), np.uint8)
+        self.board[:] = BOARD_BGR
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _add_content(self):
+        """板图真实内容：穿过右下角的板框描线＋板心一组图形（亮象牙，高对比）。"""
+        cv2.rectangle(self.board, (120, 90), (1800, 960), (188, 216, 229), 6)
+        cv2.circle(self.board, (900, 500), 90, (188, 216, 229), 5)
+        cv2.putText(self.board, "0000", (1350, 950), cv2.FONT_HERSHEY_SIMPLEX, 1.2,
+                    (188, 216, 229), 4)
+
+    def _add_watermark(self):
+        """半透明角标：逐字打，字差约 32/通道（三通道和差 ~96），落在 45-140 窗口内。
+
+        真实宿主角标就是一排等高、彼此分开的字（实测 9 个连通域、meanDist 67-97），
+        连成一团的字串不是水印形状。
+        """
+        wm = tuple(min(255, int(c) + 32) for c in BOARD_BGR)
+        for i, ch in enumerate("QoderAI"):
+            cv2.putText(self.board, ch, (1600 + i * 40, 1050), cv2.FONT_HERSHEY_SIMPLEX,
+                        1.2, wm, 2, cv2.LINE_AA)
+
+    def test_strips_low_contrast_corner_watermark(self):
+        self._add_content()
+        self._add_watermark()
+        before = self.board.copy()
+        cv2.imwrite(str(self.path), before)
+        r = review_images.strip_watermark(self.path)
+        self.assertTrue(r["detected"], "低对比角标必须被检出，不能静默放过")
+        self.assertTrue(r["removed"], f"清除应成功：{r}")
+        after = cv2.imread(str(self.path))
+        self.assertLess(r["residual_ratio"], review_images.WM_RESIDUAL_THRESHOLD)
+        # 角标那一行应回到板底色
+        band = after[1015:1058, 1595:1900].astype(np.int16)
+        self.assertLess(float(np.abs(band - np.array(BOARD_BGR, np.int16)).sum(2).mean()), 12)
+        # 内容不许被连坐：板心图形与板框描线原样保留
+        self.assertTrue(np.array_equal(after[410:590, 810:990], before[410:590, 810:990]))
+        self.assertTrue(np.array_equal(after[86:96, 200:700], before[86:96, 200:700]))
+
+    def test_leaves_bright_content_alone(self):
+        """只有高对比板图内容压在角标带上时，不得当成水印填掉。"""
+        self._add_content()
+        cv2.imwrite(str(self.path), self.board)
+        r = review_images.strip_watermark(self.path)
+        self.assertFalse(r["detected"], f"亮色描线不是水印：{r}")
+        self.assertTrue(np.array_equal(cv2.imread(str(self.path)), self.board))
+
+
 if __name__ == "__main__":
     unittest.main()
