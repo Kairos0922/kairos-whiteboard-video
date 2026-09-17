@@ -755,6 +755,15 @@ def cmd_validate(episode_dir: Path, args) -> int:
     for w in warnings:
         print(f"  ! {w}")
     print(f"报告：{rp}")
+    if getattr(args, "full", False):
+        from whiteboard_story import qa_gates
+        qbad, _qwarn, rows = qa_gates.run_all(
+            episode_dir, getattr(args, "sheets_dir", None))
+        print("\n".join(rows))
+        print(f"qa_gates：阻断 {len(qbad)} 项")
+        for b in qbad:
+            print(f"  ✗ {b}")
+        blockers = blockers + qbad
     return 1 if blockers else 0
 
 
@@ -838,6 +847,10 @@ def main() -> int:
     p_render.add_argument("--episode-dir", required=True)
     p_validate = sub.add_parser("validate")
     p_validate.add_argument("--episode-dir", required=True)
+    p_validate.add_argument("--full", action="store_true",
+                            help="加跑 qa_gates 成片闸口（扫荡/切幕/残影/缺墨/规格/响度）")
+    p_validate.add_argument("--sheets-dir", default=None,
+                            help="--full 时产出人审接触表的目录（首幕 2fps、其余 1fps）")
     args = ap.parse_args()
     if args.cmd == "probe":
         return cmd_probe(args)
