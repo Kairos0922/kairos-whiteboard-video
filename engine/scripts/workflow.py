@@ -265,6 +265,11 @@ def _load_theme_voice(theme_path: str | None) -> tuple[dict, str]:
     if not theme_path:
         return {}, ""
     tp = Path(theme_path)
+    # state.theme 存的是主题目录，voice 块在目录里的 theme.json；没这个文件=主题不声明音色
+    if tp.is_dir():
+        tp = tp / "theme.json"
+    if not tp.exists():
+        return {}, ""
     try:
         data = json.loads(tp.read_text(encoding="utf-8"))
         tv = data.get("voice", {}) or {}
@@ -476,6 +481,9 @@ def cmd_prompts(episode_dir: Path, args) -> int:
         print(f"缺 {script}")
         return 1
     scenes = json.loads(script.read_text(encoding="utf-8")).get("scenes", [])
+    chars_file = episode_dir / "input" / "characters.txt"
+    character_sheet = (chars_file.read_text(encoding="utf-8")
+                       if chars_file.exists() else None)
     want = getattr(args, "scene", None)
     out_dir = episode_dir / "input" / "prompts"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -485,7 +493,9 @@ def cmd_prompts(episode_dir: Path, args) -> int:
         if want and sid != want:
             continue
         payload = prompt_builder.build_scene_payload(
-            sid, sc.get("board_subject") or sc.get("subject") or "", theme)
+            sid, sc.get("board_subject") or sc.get("subject") or "", theme,
+            n_islands=len(sc.get("elements") or []),
+            character_sheet=character_sheet)
         dest = out_dir / f"{sid}.prompt.json"
         dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"===== {sid} =====")
@@ -497,10 +507,9 @@ def cmd_prompts(episode_dir: Path, args) -> int:
         return 1
     print(f"\n共 {n} 张。报批通过后，宿主模型一次一张生成 PNG，落到 build/boards/<id>.png，再 import。")
     if getattr(args, "theme", None):
-        # 统一存储绝对路径，避免相对路径基准不一致导致 ResourceResolver 解析失败
-        theme_path = Path(theme)
-        if not theme_path.is_absolute():
-            theme_path = (episode_dir / theme_path).resolve()
+        # 统一存储绝对路径：--theme 按当前工作目录写（../themes/<id>），这里已验证它存在，
+        # 若改按 episode_dir 为基准拼接会存进一个不存在的目录，voice/render 才炸。
+        theme_path = Path(theme).resolve()
         state["theme"] = str(theme_path)
         _write_state(episode_dir, state)
     return 0
@@ -564,6 +573,8 @@ def cmd_import(episode_dir: Path, args) -> int:
                       f"（比例非精确 16:9，已裁边等比放大）")
             else:
                 print(f"  · {b['scene']}: {ow}x{oh} → 1920x1080（自动等比缩放）")
+        # 顺序有实测依据：先清水印、后归一底色。底色归一会连半透明角标自己的颜色一起平移，
+        # 把它推出 WM_GLYPH_MAX_DIST 的标定窗口，角标反而检不出来（一期实盘 7 张里 3 张漏检）。
         wm_result = review_images.strip_watermark(f)
         if wm_result.get("detected"):
             if wm_result.get("removed"):
@@ -574,6 +585,11 @@ def cmd_import(episode_dir: Path, args) -> int:
                 b["errors"] = b.get("errors", []) + [f"水印清除失败（残留率{wm_result['residual_ratio']}），请手动处理或重新生成无水印板图"]
                 print(f"  ✗ {b['scene']}: 检测到水印但清除失败（残留率{wm_result['residual_ratio']}），请手动处理或重新生成无水印板图")
                 continue
+        bg_norm = review_images.normalize_board_bg(f, theme)
+        if bg_norm.get("normalized"):
+            bgr, tgt, moved = bg_norm["bg"], bg_norm["target"], bg_norm["moved_ratio"]
+            print(f"  · {b['scene']}: 板底色 ({bgr[2]},{bgr[1]},{bgr[0]}) → 主题 "
+                  f"({tgt[2]},{tgt[1]},{tgt[0]})，平移 {moved:.0%} 底色像素")
         r = review_images.check_board(f, theme_dir=theme)
         b["file"] = str(f)
         b["checks"] = r["info"]

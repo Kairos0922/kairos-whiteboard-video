@@ -84,6 +84,49 @@ def normalize_board_size(path: Path,
     return {"scaled": True, "size": (w, h), "cropped": cropped}
 
 
+BG_NORM_TOL = 120.0             # 与估出板底色的三通道和差上限：之内才整份平移，之外不动
+BG_NORM_MIN_SHIFT = 12          # 通道平移量下限：小于此不值得改写像素
+BG_NORM_DOMINANCE = 0.05        # 底色必须是全图至少 5% 像素的主色，否则角点估计不可信
+
+
+def normalize_board_bg(path: Path, theme_dir: Path | None) -> dict:
+    """把板图底色拉到主题 palette.board（写回原文件）。
+
+    批量生图每张板绿都不一样：一期实盘七幕角点亮度 69~82，最亮一幕与主题底色单通道
+    差 80 被 import 拒收。内核起笔前用 estimate_bg 取角点色铺满画布，底色不统一
+    等于每次切幕整块板面闪一下。
+
+    平移量按「离估出底色的距离」线性衰减：贴着底色的像素整份搬走，实色笔画原地不动，
+    过渡像素取中间值，避免在笔画边缘留一圈亮边。
+    """
+    _, target = _theme_mode(theme_dir)
+    if target is None:
+        return {"normalized": False, "reason": "主题未声明 palette.board"}
+    img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if img is None:
+        return {"normalized": False, "reason": "无法读取图片"}
+    h, w = img.shape[:2]
+    p = min(CORNER_PATCH, h // 4, w // 4)
+    corners = np.concatenate([img[:p, :p].reshape(-1, 3), img[:p, -p:].reshape(-1, 3),
+                              img[-p:, :p].reshape(-1, 3), img[-p:, -p:].reshape(-1, 3)])
+    bg = np.median(corners, axis=0).astype(np.float32)
+    delta = target.astype(np.float32) - bg
+    if float(np.abs(delta).max()) < BG_NORM_MIN_SHIFT:
+        return {"normalized": False, "bg": [int(v) for v in bg], "reason": "底色已在容差内"}
+    fl = img.astype(np.float32)
+    dist = np.abs(fl - bg).sum(axis=2)
+    if float((dist < BG_NORM_TOL).mean()) < BG_NORM_DOMINANCE:
+        return {"normalized": False, "bg": [int(v) for v in bg],
+                "reason": "角点色不是画面主色，跳过以免整图偏色"}
+    weight = (1.0 - np.clip(dist / BG_NORM_TOL, 0.0, 1.0))[..., None]
+    out = np.clip(fl + delta * weight, 0, 255).astype(np.uint8)
+    cv2.imwrite(str(path), out)
+    return {"normalized": True, "bg": [int(v) for v in bg],
+            "target": [int(v) for v in target.tolist()],
+            "shift": [int(round(v)) for v in delta],
+            "moved_ratio": round(float((weight[..., 0] > 0.5).mean()), 4)}
+
+
 def check_board(path: Path, theme_dir: Path | None = None) -> dict:
     """逐项检查一张板图，返回 {ok, errors, warnings, info}。"""
     errors: list[str] = []
@@ -281,10 +324,17 @@ WM_GLYPH_MIN_AREA = 25
 WM_GLYPH_MAX_ASPECT = 3.0             # 单字宽/高上限
 WM_GLYPH_MAX_DIST = 140               # 字形平均对比度上限：半透明角标 60-100，亮色粉笔描线 170-230（换不透明亮水印需上调此值）
 WM_GLYPH_BASELINE = 45                # 一排字的垂直中心散布上限（超出=不是一行字）
+WM_ROW_BASELINE_SPREAD = 20           # 一排字的字底散布上限：水印是共基线的一行字（实测 8-9），
+                                      # 板面斜向擦痕字底散布 40+ 靠此挡掉
 WM_GLYPH_MIN_SPAN = 60                # 横向铺开宽度下限
 WM_MIN_GLYPHS = 4                     # 少于四个字形不认为是水印
 WM_GLYPH_MAX_COVER = 0.30             # 字形总占比上限：超过说明抓到的是内容，整带放过
 WM_FILL_DILATE = 5                    # 填充框向外扩张的像素，盖住半透明边缘
+# 粘连角标：字与字之间没有空隙时整行会并成一个宽块，逐字形状判据（宽≤90、宽高比≤3）
+# 把它当成描线放过。改按「贴角」认定：岛式构图要求每个岛离四边 ≥5%，内容不会贴边。
+WM_MERGED_MAX_W = 300                 # 粘连行宽上限：再宽就是横贯画面的板框描线
+WM_MERGED_MAX_H = 40                  # 粘连行高上限：比单字更严，角标只有一行
+WM_MERGED_EDGE = 60                   # 外接框须离带的外角两条边各不超过此像素数
 
 
 def _sample_background(img: np.ndarray, x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
@@ -321,29 +371,32 @@ def _band_dist(roi: np.ndarray, bg_color: np.ndarray) -> np.ndarray:
     return np.abs(roi.astype(np.int16) - bg_color).sum(axis=2)
 
 
-def _watermark_glyphs(dist: np.ndarray) -> list[tuple[int, int, int, int]]:
+def _watermark_glyphs(dist: np.ndarray, band=None) -> list[tuple[int, int, int, int]]:
     """从带内对比度图里挑出水印那一行"小字"，返回 (x, y, w, h) 列表；不像字则返回空。
 
     判据是形状＋对比度，不是面积占比：本宿主的角标字大，非背景像素占比约 10%，
     撞上旧版"占比>5% 即视为内容"的安全上限被整块跳过，六张带水印板图静默通过。
     反过来，右下角的真实内容（人物、色块、被带边切到的描线段）会混进候选，
     所以再按基线聚行取最像一行字的那组，并用对比度上限把亮粉笔描线挡在外面。
+
+    逐字判据抓不到的第二种情况：字与字粘连成一整块（本平台角标常见），
+    此时只有「贴住带的外角」能把它和内容描线区分开，故需要传 band。
     """
     mask = (dist > WM_DIST).astype(np.uint8) * 255
     merged = cv2.dilate(mask, np.ones((3, 3), np.uint8))
     n, labels, stats, _ = cv2.connectedComponentsWithStats(merged, 8)
-    cands = []
+    cands, corner_words = [], []
     for i in range(1, n):
         x, y, bw, bh, area = (int(v) for v in stats[i])
-        if not (WM_GLYPH_MIN_H <= bh <= WM_GLYPH_MAX_H):
-            continue
-        if not (WM_GLYPH_MIN_W <= bw <= WM_GLYPH_MAX_W):
-            continue
-        if area < WM_GLYPH_MIN_AREA or bw / max(bh, 1) > WM_GLYPH_MAX_ASPECT:
+        if area < WM_GLYPH_MIN_AREA or not (WM_GLYPH_MIN_H <= bh <= WM_GLYPH_MAX_H):
             continue
         if float(dist[labels == i].mean()) > WM_GLYPH_MAX_DIST:
             continue
-        cands.append((x, y, bw, bh))
+        if (WM_GLYPH_MIN_W <= bw <= WM_GLYPH_MAX_W
+                and bw / max(bh, 1) <= WM_GLYPH_MAX_ASPECT):
+            cands.append((x, y, bw, bh))
+        elif band is not None and _hugs_corner((x, y, bw, bh), dist.shape, band):
+            corner_words.append((x, y, bw, bh))
     rows: list[list[tuple[int, int, int, int]]] = []
     for g in sorted(cands, key=lambda b: b[1] + b[3] / 2):
         cy = g[1] + g[3] / 2
@@ -356,7 +409,21 @@ def _watermark_glyphs(dist: np.ndarray) -> list[tuple[int, int, int, int]]:
     for row in rows:
         if len(row) > len(best) and _row_is_text(row, dist.size):
             best = row
+    if not best:
+        best = corner_words
     return sorted(best, key=lambda b: b[0])
+
+
+def _hugs_corner(box, shape, band) -> bool:
+    """粘连成一整行的角标：矮、不太宽，且贴住这条带所锚定的那个画面外角。"""
+    x, y, bw, bh = box
+    dw, dh = shape[1], shape[0]
+    if bh > WM_MERGED_MAX_H or not (WM_GLYPH_MAX_W < bw <= WM_MERGED_MAX_W):
+        return False
+    _, _, rx1, ry1 = band
+    near_bottom = (y + bh >= dh - WM_MERGED_EDGE) if ry1 >= 1.0 else (y <= WM_MERGED_EDGE)
+    near_right = (x + bw >= dw - WM_MERGED_EDGE) if rx1 >= 1.0 else (x <= WM_MERGED_EDGE)
+    return near_bottom and near_right
 
 
 def _row_is_text(row: list[tuple[int, int, int, int]], band_pixels: int) -> bool:
@@ -364,6 +431,9 @@ def _row_is_text(row: list[tuple[int, int, int, int]], band_pixels: int) -> bool
     if len(row) < WM_MIN_GLYPHS:
         return False
     if sum(b[2] * b[3] for b in row) > WM_GLYPH_MAX_COVER * band_pixels:
+        return False
+    bottoms = [b[1] + b[3] for b in row]
+    if max(bottoms) - min(bottoms) > WM_ROW_BASELINE_SPREAD:
         return False
     span = max(b[0] + b[2] for b in row) - min(b[0] for b in row)
     return span >= WM_GLYPH_MIN_SPAN
@@ -398,7 +468,7 @@ def strip_watermark(path: Path) -> dict:
         if x1 <= x0 or y1 <= y0:
             continue
         bg = _sample_background(img, x0, y0, x1, y1)
-        glyphs = _watermark_glyphs(_band_dist(img[y0:y1, x0:x1], bg))
+        glyphs = _watermark_glyphs(_band_dist(img[y0:y1, x0:x1], bg), band)
         if not glyphs:
             continue
         gx0 = min(x0 + g[0] for g in glyphs)

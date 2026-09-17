@@ -180,13 +180,14 @@ def _resolve_hand(ep: Path, hand_arg: str | None) -> Path:
 
 
 def _prev_scene_raw(ep: Path, sids: list[str], sid: str) -> Path | None:
-    """上一幕的内容原图（幕首淡入的来源）；首幕返回 None。"""
+    """上一幕的板面（幕首淡入的来源）；首幕返回 None。
+    优先 overlay（含标签）：上一幕收尾帧有标签，用 raw 会在切点造成标签瞬消。"""
     i = sids.index(sid)
     if i <= 0:
         return None
     prev = sids[i - 1]
-    raw = ep / "build" / "boards-layout" / f"{prev}.raw.png"
-    return raw if raw.exists() else (ep / "build" / "boards-layout" / f"{prev}.png")
+    overlay = ep / "build" / "boards-layout" / f"{prev}.png"
+    return overlay if overlay.exists() else (ep / "build" / "boards-layout" / f"{prev}.raw.png")
 
 
 def cmd_render(ep: Path, args) -> int:
@@ -211,7 +212,8 @@ def cmd_render(ep: Path, args) -> int:
                 hand, board_style="paper", fps=FPS,
                 overlay_png=ep / "build" / "boards-layout" / f"{sid}.png",
                 fade_from_png=prev,
-                hand_follow=getattr(args, "hand_follow", 1.0))
+                hand_follow=getattr(args, "hand_follow", 0.35),
+                labels_json=ep / "build" / "boards-layout" / f"{sid}.labels.json")
             print(f"OK {sid}.mp4  {time.time() - t0:.0f}s  -> {out}")
         if not args.scene:
             _update_state(ep, rendered=True)

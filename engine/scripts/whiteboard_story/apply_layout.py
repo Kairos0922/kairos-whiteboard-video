@@ -21,7 +21,7 @@ PANEL_COLORS = {
 }
 BORDER_W, RADIUS, INSET = 4, 30, 30
 BADGE_R = 48
-INK = (61, 58, 53)
+INK = (229, 216, 188)  # 主题象牙白 #E5D8BC：标签叠在黑板绿上，纸面墨色几乎不可见
 FONT_DIGIT = Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf")
 FONT_CN = Path("/System/Library/Fonts/STHeiti Medium.ttc")
 
@@ -50,7 +50,8 @@ def load_scene_layout(scene_id: str, episode_dir: Path | None = None) -> dict:
             for t in sc.get("texts", []):
                 font = FONT_CN if t.get("font") == "cn" else FONT_DIGIT
                 file_texts.append((t["text"], int(t["cx"]), int(t["cy"]),
-                                   int(t.get("size", 80)), font))
+                                   int(t.get("size", 80)), font,
+                                   int(t.get("panel", 0))))
             if file_texts:
                 texts = file_texts
     return {"panels": panels, "texts": texts}
@@ -73,12 +74,21 @@ def draw_dashed_rect(d: ImageDraw, x0, y0, x1, y1, dash=34, gap=26, width=6):
         d.line([x1, s, x1, e], fill=DASH, width=width)
 
 
-def _draw_texts(d: ImageDraw.ImageDraw, layout: dict) -> None:
-    for text, cx, cy, size, font_path in layout["texts"]:
+def _draw_texts(d: ImageDraw.ImageDraw, layout: dict) -> list[dict]:
+    """叠标签并返回标签清单（[{text, bbox, panel}]），供渲染内核按 panel 延迟揭示。"""
+    out: list[dict] = []
+    for item in layout["texts"]:
+        text, cx, cy, size, font_path = item[:5]
+        panel = int(item[5]) if len(item) > 5 else 0
         f = ImageFont.truetype(str(font_path), size)
         tb = d.textbbox((0, 0), text, font=f)
-        d.text((cx - (tb[2] - tb[0]) / 2 - tb[0], cy - (tb[3] - tb[1]) / 2 - tb[1]),
-               text, font=f, fill=INK)
+        x = cx - (tb[2] - tb[0]) / 2 - tb[0]
+        y = cy - (tb[3] - tb[1]) / 2 - tb[1]
+        d.text((x, y), text, font=f, fill=INK)
+        out.append({"text": text, "panel": panel,
+                    "bbox": [int(x + tb[0]) - 6, int(y + tb[1]) - 6,
+                             int(tb[2] - tb[0]) + 12, int(tb[3] - tb[1]) + 12]})
+    return out
 
 
 def apply_layout(board_path: Path, scene_id: str, out_path: Path,
@@ -103,11 +113,13 @@ def apply_layout(board_path: Path, scene_id: str, out_path: Path,
 
     layout = load_scene_layout(scene_id, episode_dir)
 
-    # 渲染 overlay：只叠标签
+    # 渲染 overlay：只叠标签；旁车输出标签清单供内核按 panel 延迟揭示
     canvas = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-    _draw_texts(ImageDraw.Draw(canvas), layout)
+    label_spec = _draw_texts(ImageDraw.Draw(canvas), layout)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(out_path), cv2.cvtColor(np.array(canvas), cv2.COLOR_RGB2BGR))
+    (out_path.parent / f"{out_path.stem}.labels.json").write_text(
+        json.dumps(label_spec, ensure_ascii=False, indent=1), encoding="utf-8")
 
     # 二审预览：全量标注
     if out_preview is not None:

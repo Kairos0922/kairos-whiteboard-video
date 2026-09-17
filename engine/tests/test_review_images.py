@@ -194,6 +194,24 @@ class PromptBuilderGuardTest(unittest.TestCase):
             payload = prompt_builder.build_scene_payload("scene-01", "a cat", tdir)
             self.assertIn("不要画从画面边缘伸入的手臂", payload["prompt"])
 
+    def test_island_discipline_appears_with_island_count(self):
+        """回归自一期实盘：板图被全宽边框串成一片，切不出互不搭界的分区矩形。"""
+        with tempfile.TemporaryDirectory() as td:
+            tdir = Path(td)
+            (tdir / "style-block.txt").write_text("test style block", encoding="utf-8")
+            payload = prompt_builder.build_scene_payload("scene-01", "a cat", tdir, n_islands=3)
+            self.assertIn("3 separate islands", payload["prompt"])
+            self.assertIn("never draw a line from one island to another", payload["prompt"])
+            self.assertTrue(payload["prompt"].rstrip().endswith("正常表现即可。"),
+                            "岛式纪律必须排在中文禁令之前")
+
+    def test_no_island_clause_without_count(self):
+        with tempfile.TemporaryDirectory() as td:
+            tdir = Path(td)
+            (tdir / "style-block.txt").write_text("test style block", encoding="utf-8")
+            payload = prompt_builder.build_scene_payload("scene-01", "a cat", tdir)
+            self.assertNotIn("islands", payload["prompt"])
+
     def test_probe_payload_tolerates_note_field(self):
         with tempfile.TemporaryDirectory() as td:
             tdir = Path(td)
@@ -203,6 +221,7 @@ class PromptBuilderGuardTest(unittest.TestCase):
                 encoding="utf-8")
             payload = prompt_builder.probe_payload(tdir)
             self.assertIn("a board scene", payload["prompt"])
+            self.assertNotIn("islands", payload["prompt"])
 
 
 class StripWatermarkTest(unittest.TestCase):
@@ -239,6 +258,11 @@ class StripWatermarkTest(unittest.TestCase):
             cv2.putText(self.board, ch, (1600 + i * 40, 1050), cv2.FONT_HERSHEY_SIMPLEX,
                         1.2, wm, 2, cv2.LINE_AA)
 
+    def _add_merged_word(self, at=(1805, 1060, 1919, 1079)):
+        """粘连角标：字与字之间没有空隙，整行并成一个宽块（实测 107x20）。"""
+        wm = tuple(min(255, int(c) + 32) for c in BOARD_BGR)
+        cv2.rectangle(self.board, (at[0], at[1]), (at[2], at[3]), wm, -1)
+
     def test_strips_low_contrast_corner_watermark(self):
         self._add_content()
         self._add_watermark()
@@ -256,6 +280,30 @@ class StripWatermarkTest(unittest.TestCase):
         self.assertTrue(np.array_equal(after[410:590, 810:990], before[410:590, 810:990]))
         self.assertTrue(np.array_equal(after[86:96, 200:700], before[86:96, 200:700]))
 
+    def test_strips_merged_word_hugging_corner(self):
+        """字连成一团时逐字形状判据（宽≤90）会把它当描线放过，只能靠贴角认定。"""
+        self._add_content()
+        self._add_merged_word()
+        before = self.board.copy()
+        cv2.imwrite(str(self.path), before)
+        r = review_images.strip_watermark(self.path)
+        self.assertTrue(r["detected"], f"贴角的粘连角标必须被检出：{r}")
+        self.assertTrue(r["removed"], f"清除应成功：{r}")
+        after = cv2.imread(str(self.path))
+        self.assertLess(float(np.abs(after[1065:1075, 1850:1900].astype(np.int16)
+                                     - np.array(BOARD_BGR, np.int16)).sum(2).mean()), 12,
+                        "角标应回到板底色")
+        self.assertTrue(np.array_equal(after[410:590, 810:990], before[410:590, 810:990]))
+
+    def test_ignores_wide_mark_that_does_not_hug_corner(self):
+        """同样宽、同样对比度，但不贴画面外角的就是板图内容（岛式构图保证内容离边 ≥5%）。"""
+        self._add_content()
+        self._add_merged_word(at=(1560, 985, 1675, 1005))
+        cv2.imwrite(str(self.path), self.board)
+        r = review_images.strip_watermark(self.path)
+        self.assertFalse(r["detected"], f"不贴角的宽块不是角标：{r}")
+        self.assertTrue(np.array_equal(cv2.imread(str(self.path)), self.board))
+
     def test_leaves_bright_content_alone(self):
         """只有高对比板图内容压在角标带上时，不得当成水印填掉。"""
         self._add_content()
@@ -263,6 +311,87 @@ class StripWatermarkTest(unittest.TestCase):
         r = review_images.strip_watermark(self.path)
         self.assertFalse(r["detected"], f"亮色描线不是水印：{r}")
         self.assertTrue(np.array_equal(cv2.imread(str(self.path)), self.board))
+
+
+class NormalizeBoardBgTest(unittest.TestCase):
+    """批量生图的板绿每张偏一点：import 前拉回主题 palette.board。
+
+    回归自一期实盘：七幕角点亮度 69~82，最亮一幕与主题底色单通道差 80 被 import
+    拒收；内核用 estimate_bg 铺画布，底色不统一等于每次切幕整块板面闪一下。
+    """
+
+    OFF_TINT = (90, 134, 130)          # 生图实际给出的偏亮偏蓝板底
+    IVORY = (188, 216, 229)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.path = root / "scene-01.png"
+        self.theme = root / "theme"
+        self.theme.mkdir()
+        (self.theme / "theme.json").write_text(json.dumps(
+            {"renderer_mode": "chalk", "palette": {"board": "#153A32"}}), encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _board(self, tint=None, content=True):
+        img = np.full((1080, 1920, 3), tint or self.OFF_TINT, dtype=np.uint8)
+        if content:
+            cv2.line(img, (300, 300), (1400, 300), self.IVORY, 8)
+            cv2.circle(img, (700, 620), 70, (125, 180, 244), -1)   # 桃色实心块
+        cv2.imwrite(str(self.path), img)
+        return img
+
+    def test_pulls_board_tint_onto_theme_color(self):
+        before = self._board()
+        r = review_images.normalize_board_bg(self.path, self.theme)
+        self.assertTrue(r["normalized"], f"偏色板底应被归一：{r}")
+        after = cv2.imread(str(self.path))
+        for (y, x) in [(0, 0), (0, 1872), (1032, 0), (1032, 1872)]:
+            self.assertEqual(tuple(after[y:y + 48, x:x + 48].reshape(-1, 3).mean(0).round()),
+                             (50.0, 58.0, 21.0), "四角应精确落到 #153A32")
+        # 实色笔画不许被连坐平移
+        self.assertTrue(np.array_equal(after[296:305, 400:1200], before[296:305, 400:1200]),
+                        "象牙描线应原样保留")
+        self.assertTrue(np.array_equal(after[615:625, 690:710], before[615:625, 690:710]),
+                        "桃色实心块应原样保留")
+
+    def test_normalized_board_passes_chalk_corner_checks(self):
+        self._board()
+        self.assertTrue(review_images.check_board(self.path, theme_dir=self.theme)["errors"])
+        review_images.normalize_board_bg(self.path, self.theme)
+        errors = [e for e in review_images.check_board(self.path, theme_dir=self.theme)["errors"]
+                  if "角落" in e]
+        self.assertEqual(errors, [], f"归一后不该再报角落偏色：{errors}")
+
+    def test_skips_board_already_on_palette(self):
+        self._board(tint=(50, 58, 21))
+        before = cv2.imread(str(self.path))
+        r = review_images.normalize_board_bg(self.path, self.theme)
+        self.assertFalse(r["normalized"])
+        self.assertEqual(r["reason"], "底色已在容差内")
+        self.assertTrue(np.array_equal(cv2.imread(str(self.path)), before))
+
+    def test_skips_theme_without_board_color(self):
+        self._board()
+        (self.theme / "theme.json").write_text('{"renderer_mode": "chalk"}', encoding="utf-8")
+        r = review_images.normalize_board_bg(self.path, self.theme)
+        self.assertFalse(r["normalized"])
+        self.assertEqual(r["reason"], "主题未声明 palette.board")
+
+    def test_skips_when_corner_color_is_not_dominant(self):
+        """四角采样窗（48×48）是深色、画面主体是亮场：角点代表不了板底，整图平移会毁掉内容。"""
+        img = np.full((1080, 1920, 3), (200, 200, 200), dtype=np.uint8)
+        img[:48, :48] = self.OFF_TINT
+        img[:48, -48:] = self.OFF_TINT
+        img[-48:, :48] = self.OFF_TINT
+        img[-48:, -48:] = self.OFF_TINT
+        cv2.imwrite(str(self.path), img)
+        before = cv2.imread(str(self.path))
+        r = review_images.normalize_board_bg(self.path, self.theme)
+        self.assertFalse(r["normalized"], f"角点不是主色时不该动图：{r}")
+        self.assertTrue(np.array_equal(cv2.imread(str(self.path)), before))
 
 
 if __name__ == "__main__":
