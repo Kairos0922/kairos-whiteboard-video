@@ -109,6 +109,14 @@ metadata:
   （`{"tip":[x,y]}` 原图坐标）；换手必须重新校准，否则笔尖悬浮或插进板里。
 - 带 ops 的分区揭示窗 = 所绑句子边界的并集（不是锚短语的几个词）；句级口径只在
   。？！!? 断句（`split_sentences` 唯一权威）。
+- **渲染缓存键是依赖文件 mtime，不含引擎代码**：改 kernel/渲染层后直接 render 会打印
+  "跳过（无变化）"并评估旧片。必须先 `touch projects/<ep>/build/annotations/*.annotation.json`
+  再 render（一期实盘：差点拿旧片当修复验证）。
+- **验证循环增量走**：修引擎 → `render --scene <id>` 单幕 → 单幕接触表人审 → 通过才全量
+  render + assemble；全链重跑只留在交付前那一次。全量重跑当默认动作 = 一天烧在等待上。
+- **生图配额 preflight 与降级阶梯**：批量出板前先探一次配额（1 张试探图）；遇 403/
+  code=112 按阶梯降级：①用户供图通道 ②等额度恢复（登记阻塞与解锁条件）③interim 交付
+  （必须带诚实评分卡 + 剩余缺陷清单 + 解锁路径，且用户知情批准）。不许静默卡死等额度。
 
 ## 用户路径（做一期视频）
 
@@ -178,6 +186,9 @@ metadata:
    （自动清右下角平台水印；chalk 主题按板底色查四角）。
 5. **自动分区与标注**：写 `input/layout.json`（panels 与 `elements[]` 数量一一对应），
    `build_video.py … layout` → `annotate` 全自动执行。
+6. **板图内容审**（机筛 + 人复核，判据见 `quality-checklist.md` 板图节）：每板脸部放大裁切
+   对照主题角色圣经逐张看（骷髅感字形 = 不合格）；背景匀净度量出数值；用户给了参考图时
+   强制并排三项比对（色板 / 线宽 / 填色策略），差异结论进确认包。
 
 **产出**：全部场景图并排预览（`build/boards/` 下所有 PNG）+ 绘制顺序预览
 （`build/boards-layout/*.preview.png`，分区框/编号圈只在预览，不进成片）。
@@ -190,7 +201,7 @@ metadata:
 `boards_reviewed=true`、`annotated=true`
 
 **完成判据**：每幕一张且 check_board 全 ok + 每幕 matched、零降级 warning（warning = 不合格）+
-用户确认全部场景图视觉效果。
+板图内容审三项零命中（脸 / 背景匀净 / 参考图比对）+ 用户确认全部场景图视觉效果。
 
 ---
 
@@ -204,7 +215,9 @@ metadata:
 2. **渲染**：`build_video.py … render --jobs N`（并行渲染所有幕，缺省 CPU 核数一半上限 4；
    7 幕约 1 分钟）。
 3. **合成**：`build_video.py … assemble`（音画合成 + 词级 ASS 字幕卡拉OK逐字高亮）。
-4. **验证**：`workflow.py validate`（零阻断）。
+4. **验证**：`workflow.py validate --full --sheets-dir <目录>`（零阻断）：既有对齐护栏 +
+   qa_gates 机器闸（规格/响度/死寂/扫荡审计/切幕/残影/幕末缺墨），并产出首幕 2fps、
+   其余 1fps 接触表供人审（人审闸与诚实评分卡见 `quality-checklist.md` 成片终审）。
 5. **落标志**：用户确认最终产物后跑 `workflow.py confirm-final`。
 
 **产出**：最终视频 `deliverables/final.mp4`。
