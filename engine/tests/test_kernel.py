@@ -160,6 +160,33 @@ class ContinuousCanvasTest(unittest.TestCase):
 
 
 
+class SemanticRevealTest(unittest.TestCase):
+    def test_nested_contour_is_deferred_as_detail(self):
+        outer = np.asarray([[100, 80], [180, 80], [180, 160], [100, 160], [100, 80]], dtype=np.int32)
+        face = np.asarray([[120, 100], [160, 100], [160, 140], [120, 140], [120, 100]], dtype=np.int32)
+        cum_o, _ = K._arc_cum(outer)
+        cum_f, _ = K._arc_cum(face)
+        prep = [(outer, cum_o, float(cum_o[-1])), (face, cum_f, float(cum_f[-1]))]
+        nested = K._nested_outline_ids(prep)
+        self.assertIn(id(face), nested)
+        self.assertNotIn(id(outer), nested)
+
+    def test_nested_detail_is_not_scheduled_before_fill(self):
+        # A character-like object: large body/head contour + smaller face contour + fill.
+        outer = np.asarray([[100, 80], [180, 80], [180, 200], [100, 200], [100, 80]], dtype=np.int32)
+        face = np.asarray([[120, 100], [160, 100], [160, 140], [120, 140], [120, 100]], dtype=np.int32)
+        fill = np.asarray([[125, 120], [155, 120]], dtype=np.int32)
+        co, _ = K._arc_cum(outer)
+        cf, _ = K._arc_cum(face)
+        ck, _ = K._arc_cum(fill)
+        prep = [(outer, co, float(co[-1])), (face, cf, float(cf[-1])), (fill, ck, float(ck[-1]))]
+        nested = K._nested_outline_ids([prep[0], prep[1]])
+        main = [p for p in [prep[0], prep[1]] if id(p) not in nested]
+        detail = [p for p in [prep[0], prep[1]] if id(p) in nested]
+        self.assertEqual([id(outer)], [id(p) for p in main])
+        self.assertEqual([id(face)], [id(p) for p in detail])
+
+
 class RenderSmokeTest(unittest.TestCase):
     def test_full_chain_small(self):
         with tempfile.TemporaryDirectory() as td:
