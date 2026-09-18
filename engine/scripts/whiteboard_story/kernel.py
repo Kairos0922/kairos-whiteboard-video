@@ -577,7 +577,8 @@ def _slot_durations(slots: list[list], duration_ms: int) -> list[int]:
 
 def build_tasks(elements: list[Element], board: np.ndarray,
                 strokes_global: list[np.ndarray],
-                skeleton: np.ndarray | None = None) -> list[Task]:
+                skeleton: np.ndarray | None = None,
+                delta_mask: np.ndarray | None = None) -> list[Task]:
     """按元素窗口编排绝对时间任务表。
 
     架构 v2（2026-09-05 重构）：
@@ -620,6 +621,23 @@ def build_tasks(elements: list[Element], board: np.ndarray,
         outlines = _merge_fragments(outlines)
         outlines.sort(key=lambda s: _arc_cum(s)[1], reverse=True)
         fills = build_fill_strokes(board, el, exclude_mask=excl, protected=el.protected)
+        if delta_mask is not None:
+            # 连续白板：填色也必须只覆盖本幕新增区域，否则上一幕的色块会被再次扫色。
+            kept_fills: list[np.ndarray] = []
+            for fp in fills:
+                keep = delta_mask[np.clip(fp[:, 1], 0, delta_mask.shape[0] - 1),
+                                  np.clip(fp[:, 0], 0, delta_mask.shape[1] - 1)]
+                if not keep.any():
+                    continue
+                bounds = np.where(np.diff(keep.astype(np.int8)) != 0)[0] + 1
+                start = 0
+                state = bool(keep[0])
+                for end in list(bounds) + [len(fp)]:
+                    if state and end - start >= 3:
+                        kept_fills.append(fp[start:end])
+                    start = end
+                    state = not state
+            fills = kept_fills
         # 填色误判治理：轮廓线自身围成的"细闭合带"会被填色算法当成填色区，
         # 蛇形行纯重描轮廓（视觉零新墨）却占几百个 draw+travel 任务＝扫荡根因。
         # 轮廓先入掩膜再测填色行覆盖：贴线带剔除，离线的真色块填色原样保留。
@@ -847,9 +865,20 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
             skel = zhang_suen_skeleton(_ink)
 
     strokes_for_tasks = _trace_merged(skel, (w, h))
+    delta_mask = None
     if initial_board is not None:
+        # 与 _delta_strokes 使用同一套像素语义，保证描线/填色增量一致。
+        import cv2
+        ink_now = extract_ink_mask(board)
+        ink_old = extract_ink_mask(initial_board)
+        old_dilated = cv2.dilate(ink_old.astype(np.uint8), np.ones((7, 7), np.uint8)).astype(bool)
+        delta_mask = ink_now & ~old_dilated
+        changed = (np.abs(board.astype(np.int16) - initial_board.astype(np.int16)).sum(axis=2) > 90)
+        delta_mask |= changed & ink_now
+        delta_mask = cv2.dilate(delta_mask.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
         strokes_for_tasks = _delta_strokes(strokes_for_tasks, board, initial_board)
-    tasks = build_tasks(content_elements, board, strokes_for_tasks, skeleton=skel)
+    tasks = build_tasks(content_elements, board, strokes_for_tasks, skeleton=skel,
+                        delta_mask=delta_mask)
     if not any(t.kind == "draw" for t in tasks) and initial_board is None:
         raise RuntimeError("时序编排结果为零绘制任务")
     draw_tasks = [t for t in tasks if t.kind == "draw"]
