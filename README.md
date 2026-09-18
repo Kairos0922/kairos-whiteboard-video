@@ -48,7 +48,7 @@ probe / lint / spans / import / confirm-boards / render / validate`。
 
 ## 人物一致性与默认主题
 
-全片反复出现的人物使用 `input/characters.json` 作为唯一身份圣经。`id` 一经建立，跨场景保持不变；`immutable` 写外形锚点（发型轮廓、脸型、眼睛、眼镜、服装、主色、比例），`allowed_variations` 只写允许随剧情变化的姿势/表情/视角/道具。运行 `workflow.py prompts` 时，所有场景 prompt 会自动注入一致性锁，并额外生成 `input/character-sheet.prompt.txt` 供宿主模型先制作 canonical character sheet。
+全片反复出现的人物使用 `input/characters.json` 作为唯一身份圣经。`id` 一经建立，跨场景保持不变；`immutable` 写外形锚点（发型轮廓、脸型、眼睛、眼镜、服装、主色、比例），`allowed_variations` 只写允许随剧情变化的姿势/表情/视角/道具。运行 `workflow.py prompts` 时，所有场景 prompt 会自动注入一致性锁，并额外生成 `input/character-sheet.prompt.txt` 供宿主模型先制作 canonical character sheet。 现在跨幕人物还必须提供真实 `reference_images`（PNG/JPG/WebP）；`prompts` 会生成 `input/character-reference-manifest.json`，把每个场景实际使用的角色参考图路径写进 payload。宿主支持图像参考时应优先绑定这些图片，而不是只依赖文字描述。
 
 默认 `chalkboard-chibi` 主题以参考板图为冻结合同（v2）：统一深墨绿底、暖象牙细线、navy 头发/外套、桃色皮肤、少量 violet/coral/mustard；主题的 `theme.json`、`style-block.txt`、`character-contract.txt`、`probe.json` 在生成前会做同源校验，避免 prompt 与探针再次互相打架。
 
