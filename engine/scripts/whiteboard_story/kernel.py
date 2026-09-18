@@ -48,6 +48,8 @@ CLUSTER_DILATE = 18              # 对象聚类膨胀半径 px（连通域判定
                                 # 等间距 <18px 的部分视为同一对象，避免人物被拆成多组导致骷髅头）
 DETAIL_MAX_LEN = 70              # 弧长 < 此值且 bbox < DETAIL_MAX_BOX 的描线判为细节
 DETAIL_MAX_BOX = 50              # （五官/腮红/小装饰）：排到本组填色之后上墨，
+NESTED_DETAIL_RATIO = 0.72        # 内嵌轮廓若明显落在更大轮廓内部，视为人物/图标细节，
+                                  # 即使自身弧长较长也延后，避免“脸圈先出来=骷髅”中间态。
                                 # 杜绝"脸还是板底深色、眼眶先出"的骷髅中间态
 LABEL_FADE_MS = 300              # 标签随所属岛画完淡入的时长（废 chrome 常驻：
                                 # 标签未画先挂是"黑板上一直有三个字"的根因）
@@ -61,6 +63,7 @@ FADE_IN_MS = 700                 # 幕首自上一幕板面淡入背景的时长
                                 # 380ms 太短读起来像硬切）
 HAND_FADE_MS = 240               # 手出入画淡入淡出时长（硬切会弹跳感）
 HAND_LEAD_MS = 350               # 落笔前这么久手才淡入：空档/位移段手一律离画，
+HAND_SETTLE_MS = 180              # 最后一笔结束后短暂停笔，给旁白尾音一个视觉锚点。
                                 # 杜绝"手拿着粉笔来回动却不落墨"的空转观感
 
 
@@ -432,6 +435,40 @@ def _schedule_group(eid: str, start_ms: int, end_ms: int,
             tk.start_ms, tk.end_ms = s, max(e, s + 1)
 
 
+def _stroke_bbox(pts: np.ndarray) -> tuple[int, int, int, int]:
+    """Return inclusive-ish stroke bbox as x, y, w, h."""
+    x0, x1 = int(pts[:, 0].min()), int(pts[:, 0].max())
+    y0, y1 = int(pts[:, 1].min()), int(pts[:, 1].max())
+    return x0, y0, max(1, x1 - x0 + 1), max(1, y1 - y0 + 1)
+
+
+def _nested_outline_ids(outlines: list[tuple]) -> set[int]:
+    """Find outlines substantially contained by a larger outline bbox.
+
+    This is intentionally geometry-only because current annotations do not carry
+    reliable character-part semantics. A nested compact contour (face/eye/badge/
+    icon detail) should not be exposed before its enclosing contour/fill.
+    """
+    boxes = [(p, _stroke_bbox(p[0])) for p in outlines]
+    nested: set[int] = set()
+    for i, (p, (x, y, w, h)) in enumerate(boxes):
+        area = float(w * h)
+        if area <= 0:
+            continue
+        for j, (_q, (ox, oy, ow, oh)) in enumerate(boxes):
+            if i == j or ow * oh <= area:
+                continue
+            ix0, iy0 = max(x, ox), max(y, oy)
+            ix1, iy1 = min(x + w, ox + ow), min(y + h, oy + oh)
+            inter = max(0, ix1 - ix0) * max(0, iy1 - iy0)
+            if inter / area < NESTED_DETAIL_RATIO:
+                continue
+            if area <= ow * oh * 0.55:
+                nested.add(id(p))
+                break
+    return nested
+
+
 def _object_groups(prep: list, el: Element) -> list[list]:
     """把单元内笔画集合按连通域聚成对象组，阅读顺序（上→下、左→右）返回。
 
@@ -577,7 +614,8 @@ def _slot_durations(slots: list[list], duration_ms: int) -> list[int]:
 
 def build_tasks(elements: list[Element], board: np.ndarray,
                 strokes_global: list[np.ndarray],
-                skeleton: np.ndarray | None = None) -> list[Task]:
+                skeleton: np.ndarray | None = None,
+                delta_mask: np.ndarray | None = None) -> list[Task]:
     """按元素窗口编排绝对时间任务表。
 
     架构 v2（2026-09-05 重构）：
@@ -614,12 +652,33 @@ def build_tasks(elements: list[Element], board: np.ndarray,
         outlines = _clip_strokes(
             sorted(by_elem.get(el.eid, []), key=lambda s: _arc_cum(s)[1], reverse=True),
             el.protected)
+        if delta_mask is not None:
+            # 描线同样必须裁成“新增墨迹段”。否则一条跨越旧内容/新内容的骨架线
+            # 会把旧笔画带回本幕，造成重描和视觉鬼影。
+            outlines = _mask_strokes(outlines, delta_mask, min_points=2)
         # 碎段治理（修"手来回扫却不落墨"）：先剔除贴线平行残段（重描零新墨），
         # 再把同一粉笔行的共线碎段接成连续折线（单任务恒速走完）
         outlines = _drop_covered(outlines)
         outlines = _merge_fragments(outlines)
         outlines.sort(key=lambda s: _arc_cum(s)[1], reverse=True)
         fills = build_fill_strokes(board, el, exclude_mask=excl, protected=el.protected)
+        if delta_mask is not None:
+            # 连续白板：填色也必须只覆盖本幕新增区域，否则上一幕的色块会被再次扫色。
+            kept_fills: list[np.ndarray] = []
+            for fp in fills:
+                keep = delta_mask[np.clip(fp[:, 1], 0, delta_mask.shape[0] - 1),
+                                  np.clip(fp[:, 0], 0, delta_mask.shape[1] - 1)]
+                if not keep.any():
+                    continue
+                bounds = np.where(np.diff(keep.astype(np.int8)) != 0)[0] + 1
+                start = 0
+                state = bool(keep[0])
+                for end in list(bounds) + [len(fp)]:
+                    if state and end - start >= 3:
+                        kept_fills.append(fp[start:end])
+                    start = end
+                    state = not state
+            fills = kept_fills
         # 填色误判治理：轮廓线自身围成的"细闭合带"会被填色算法当成填色区，
         # 蛇形行纯重描轮廓（视觉零新墨）却占几百个 draw+travel 任务＝扫荡根因。
         # 轮廓先入掩膜再测填色行覆盖：贴线带剔除，离线的真色块填色原样保留。
@@ -660,11 +719,17 @@ def build_tasks(elements: list[Element], board: np.ndarray,
             group_outlines = [p for p in group if id(p) in o_ids]
             group_fills = [p for p in group if id(p) not in o_ids]
             main_outlines, detail_outlines = [], []
+            nested_ids = _nested_outline_ids(group_outlines)
             for p in group_outlines:
                 pts, cum = p[0], p[1]
                 bw = int(pts[:, 0].max() - pts[:, 0].min() + 1)
                 bh = int(pts[:, 1].max() - pts[:, 1].min() + 1)
-                if float(cum[-1]) < DETAIL_MAX_LEN and bw < DETAIL_MAX_BOX and bh < DETAIL_MAX_BOX:
+                is_small_detail = (
+                    float(cum[-1]) < DETAIL_MAX_LEN
+                    and bw < DETAIL_MAX_BOX
+                    and bh < DETAIL_MAX_BOX
+                )
+                if is_small_detail or id(p) in nested_ids:
                     detail_outlines.append(p)
                 else:
                     main_outlines.append(p)
@@ -719,13 +784,69 @@ def _hand_tip(hand_png: Path, img_size: tuple[int, int]) -> tuple[int, int]:
     return (int(img_size[0] * HAND_TIP_RATIO[0]), int(img_size[1] * HAND_TIP_RATIO[1]))
 
 
+def _mask_strokes(strokes: list[np.ndarray], mask: np.ndarray,
+                 min_points: int = 2) -> list[np.ndarray]:
+    """Split polylines into contiguous portions covered by mask."""
+    out: list[np.ndarray] = []
+    h, w = mask.shape[:2]
+    for s in strokes:
+        if len(s) < min_points:
+            continue
+        keep = mask[np.clip(s[:, 1], 0, h - 1), np.clip(s[:, 0], 0, w - 1)]
+        bounds = np.where(np.diff(keep.astype(np.int8)) != 0)[0] + 1
+        start = 0
+        state = bool(keep[0])
+        for end in list(bounds) + [len(s)]:
+            if state and end - start >= min_points:
+                out.append(s[start:end])
+            start = end
+            state = not state
+    return out
+
+
+def _delta_strokes(strokes: list[np.ndarray], current: np.ndarray,
+                   initial: np.ndarray) -> list[np.ndarray]:
+    """Return only stroke segments that are new on a persistent whiteboard.
+
+    Scene boards remain complete illustrations; the renderer must not redraw ink
+    that already exists on the previous scene's canvas.
+    """
+    import cv2
+    if current.shape != initial.shape:
+        return strokes
+    ink_now = extract_ink_mask(current)
+    ink_old = extract_ink_mask(initial)
+    old_dilated = cv2.dilate(ink_old.astype(np.uint8),
+                             np.ones((7, 7), np.uint8)).astype(bool)
+    delta = ink_now & ~old_dilated
+    changed = (np.abs(current.astype(np.int16) - initial.astype(np.int16)).sum(axis=2) > 90)
+    delta |= changed & ink_now
+    delta = cv2.dilate(delta.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+    out: list[np.ndarray] = []
+    for s in strokes:
+        keep = delta[np.clip(s[:, 1], 0, delta.shape[0]-1),
+                     np.clip(s[:, 0], 0, delta.shape[1]-1)]
+        if not keep.any():
+            continue
+        bounds = np.where(np.diff(keep.astype(np.int8)) != 0)[0] + 1
+        start = 0
+        state = bool(keep[0])
+        for end in list(bounds) + [len(s)]:
+            if state and end - start >= 2:
+                out.append(s[start:end])
+            start = end
+            state = not state
+    return out
+
+
 def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
                         hand_png: Path, fps: int = 30,
                         total_ms: int | None = None,
                         overlay_png: Path | None = None,
                         fade_from_png: Path | None = None,
                         hand_follow: float = 1.0,
-                        labels_json: Path | None = None) -> Path:
+                        labels_json: Path | None = None,
+                        initial_board_png: Path | None = None) -> Path:
     """单幕渲染入口：区域时序揭示 + 描线/填色 + 手部贴笔尖 → H.264 MP4。
 
     board_png = 内容原图（墨迹来源）；overlay_png = 版式 overlay（raw + 标签文字）。
@@ -776,6 +897,14 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
         if pb.shape == board.shape:
             prev_board = pb
 
+    initial_board = None
+    if initial_board_png is not None and Path(initial_board_png).exists():
+        ib = np.asarray(Image.open(initial_board_png).convert("RGB"))
+        if ib.shape == board.shape:
+            initial_board = ib
+    elif prev_board is not None:
+        initial_board = prev_board
+
     content_elements = [e for e in ann.elements if e.eid != "layout"]
 
     # 在 build_tasks 之前清除 board 中 MOVE 物体的原始位置，并重新生成 ink/skeleton。
@@ -802,12 +931,25 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
         if _ink.any():
             skel = zhang_suen_skeleton(_ink)
 
-    tasks = build_tasks(content_elements, board, _trace_merged(skel, (w, h)),
-                        skeleton=skel)
-    if not any(t.kind == "draw" for t in tasks):
+    strokes_for_tasks = _trace_merged(skel, (w, h))
+    delta_mask = None
+    if initial_board is not None:
+        # 与 _delta_strokes 使用同一套像素语义，保证描线/填色增量一致。
+        import cv2
+        ink_now = extract_ink_mask(board)
+        ink_old = extract_ink_mask(initial_board)
+        old_dilated = cv2.dilate(ink_old.astype(np.uint8), np.ones((7, 7), np.uint8)).astype(bool)
+        delta_mask = ink_now & ~old_dilated
+        changed = (np.abs(board.astype(np.int16) - initial_board.astype(np.int16)).sum(axis=2) > 90)
+        delta_mask |= changed & ink_now
+        delta_mask = cv2.dilate(delta_mask.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+        strokes_for_tasks = _delta_strokes(strokes_for_tasks, board, initial_board)
+    tasks = build_tasks(content_elements, board, strokes_for_tasks, skeleton=skel,
+                        delta_mask=delta_mask)
+    if not any(t.kind == "draw" for t in tasks) and initial_board is None:
         raise RuntimeError("时序编排结果为零绘制任务")
-    # draw_end 包含所有任务（draw + move），确保 MOVE 执行期间不被整图兜底重置
-    draw_end = max(t.end_ms for t in tasks)
+    draw_tasks = [t for t in tasks if t.kind == "draw"]
+    draw_end = max((t.end_ms for t in draw_tasks), default=0)
 
     # 标签揭示时刻 = 所属 panel 最后一个任务的结束时间（随岛画完淡入）
     if labels:
@@ -854,8 +996,8 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
     bg = estimate_bg(board)
     bg_arr = np.array(bg, dtype=np.float32)
     canvas = np.empty_like(board)
-    canvas[:] = bg
-    if chrome_mask is not None:
+    canvas[:] = initial_board if initial_board is not None else bg
+    if chrome_mask is not None and initial_board is None:
         canvas[chrome_mask] = base[chrome_mask]
     complete = False                      # 进入收尾整图态后不再回退
     hand_img = Image.open(hand_png).convert("RGBA")
@@ -962,12 +1104,16 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
             else:
                 while ink_i < len(ink_starts) and ink_starts[ink_i] <= t_ms:
                     ink_i += 1
-                hand_visible = (ink_i < len(ink_starts)
-                                and ink_starts[ink_i] - t_ms <= HAND_LEAD_MS)
+                hand_visible = (
+                    draw_end > 0 and draw_end <= t_ms < draw_end + HAND_SETTLE_MS
+                ) or (
+                    ink_i < len(ink_starts)
+                    and ink_starts[ink_i] - t_ms <= HAND_LEAD_MS
+                )
 
             # 幕首淡入：从上一幕板面淡出到背景色（擦黑板式切幕；首笔最早 1050ms，
             # 与淡入窗不重叠，不会覆盖已画内容）
-            if prev_board is not None and t_ms < FADE_IN_MS and not complete:
+            if prev_board is not None and initial_board is None and t_ms < FADE_IN_MS and not complete:
                 # 时钟前推一帧让窗口末帧 k 恰为 1：否则末帧 (1-k)≈0.7% 的上一幕残影
                 # 会留在 canvas 上直到收尾整图兜底（平坦帧编码为 skip，残影不刷新）
                 k = ease_in_out(min(1.0, (t_ms + 1000.0 / fps) / FADE_IN_MS))
@@ -977,7 +1123,8 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
                     canvas[chrome_mask] = base[chrome_mask]
 
             if not complete and t_ms >= draw_end:
-                canvas[:] = base                     # 整图兜底，消除骨架/行距漏像素
+                if initial_board is None:
+                    canvas[:] = base
                 complete = True
 
             # 标签揭示：随所属岛画完淡入，最后合成保证不被后续笔画覆盖

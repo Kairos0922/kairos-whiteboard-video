@@ -212,6 +212,7 @@ def cmd_render(ep: Path, args) -> int:
                 hand, board_style="paper", fps=FPS,
                 overlay_png=ep / "build" / "boards-layout" / f"{sid}.png",
                 fade_from_png=prev,
+                initial_board_png=prev,
                 hand_follow=getattr(args, "hand_follow", 0.35),
                 labels_json=ep / "build" / "boards-layout" / f"{sid}.labels.json")
             print(f"OK {sid}.mp4  {time.time() - t0:.0f}s  -> {out}")

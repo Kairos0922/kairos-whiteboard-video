@@ -124,6 +124,69 @@ def K_board_strokes(p: Path):
     return board_to_strokes(p)
 
 
+class ContinuousCanvasTest(unittest.TestCase):
+    def test_delta_strokes_ignores_persistent_ink(self):
+        initial = np_img(BG)
+        current = initial.copy()
+        current[80:90, 80:220] = INK
+        initial[80:90, 80:140] = INK
+        pts = np.array([[80, 85], [120, 85], [160, 85], [200, 85]], dtype=np.int32)
+        delta = K._delta_strokes([pts], current, initial)
+        self.assertTrue(delta)
+        self.assertGreaterEqual(delta[0][0, 0], 140)
+        self.assertGreaterEqual(delta[0][-1, 0], 190)
+
+    def test_delta_mask_prevents_old_fill_tasks(self):
+        with tempfile.TemporaryDirectory() as td:
+            b, a, _h = make_fixture(td)
+            board, _ink, skel = K.load_board_layers(b)
+            ann = K.parse_annotation(a)
+            initial = board.copy()
+            # 模拟上一幕已存在左侧圆形色块，本幕只新增右侧区域。
+            initial[180:270, 90:180] = (178, 58, 58)
+            delta = np.ones(board.shape[:2], dtype=bool)
+            delta[:, :300] = False
+            tasks = K.build_tasks(ann.elements, board, K.board_to_strokes(b),
+                                  skeleton=skel, delta_mask=delta)
+            for task in tasks:
+                if task.kind == "draw" and task.pts is not None:
+                    # 每个 draw 至少有有效新增段；首尾允许在裁剪边界上保留一个
+                    # 连接点，但不能让整条旧区域笔画进入任务。
+                    covered = delta[
+                        np.clip(task.pts[:, 1], 0, H - 1),
+                        np.clip(task.pts[:, 0], 0, W - 1)]
+                    self.assertGreaterEqual(covered.mean(), 0.75,
+                                            "continuous scene must not mostly redraw old-region ink")
+
+
+
+class SemanticRevealTest(unittest.TestCase):
+    def test_nested_contour_is_deferred_as_detail(self):
+        outer = np.asarray([[100, 80], [180, 80], [180, 160], [100, 160], [100, 80]], dtype=np.int32)
+        face = np.asarray([[120, 100], [160, 100], [160, 140], [120, 140], [120, 100]], dtype=np.int32)
+        cum_o, _ = K._arc_cum(outer)
+        cum_f, _ = K._arc_cum(face)
+        prep = [(outer, cum_o, float(cum_o[-1])), (face, cum_f, float(cum_f[-1]))]
+        nested = K._nested_outline_ids(prep)
+        self.assertIn(id(prep[1]), nested)
+        self.assertNotIn(id(prep[0]), nested)
+
+    def test_nested_detail_is_not_scheduled_before_fill(self):
+        # A character-like object: large body/head contour + smaller face contour + fill.
+        outer = np.asarray([[100, 80], [180, 80], [180, 200], [100, 200], [100, 80]], dtype=np.int32)
+        face = np.asarray([[120, 100], [160, 100], [160, 140], [120, 140], [120, 100]], dtype=np.int32)
+        fill = np.asarray([[125, 120], [155, 120]], dtype=np.int32)
+        co, _ = K._arc_cum(outer)
+        cf, _ = K._arc_cum(face)
+        ck, _ = K._arc_cum(fill)
+        prep = [(outer, co, float(co[-1])), (face, cf, float(cf[-1])), (fill, ck, float(ck[-1]))]
+        nested = K._nested_outline_ids([prep[0], prep[1]])
+        main = [p for p in [prep[0], prep[1]] if id(p) not in nested]
+        detail = [p for p in [prep[0], prep[1]] if id(p) in nested]
+        self.assertEqual([id(prep[0])], [id(p) for p in main])
+        self.assertEqual([id(prep[1])], [id(p) for p in detail])
+
+
 class RenderSmokeTest(unittest.TestCase):
     def test_full_chain_small(self):
         with tempfile.TemporaryDirectory() as td:
