@@ -67,6 +67,15 @@ class ThemeContractTest(unittest.TestCase):
             self.assertNotIn(legacy, subject)
 
 
+class ThemeContractCompatibilityTest(unittest.TestCase):
+    def test_minimal_temporary_theme_is_compatible(self):
+        with tempfile.TemporaryDirectory() as td:
+            theme = Path(td)
+            (theme / "style-block.txt").write_text("temporary test style", encoding="utf-8")
+            result = review_images.validate_theme_package(theme)
+            self.assertTrue(result["ok"], result)
+            self.assertTrue(result["warnings"])
+
 class PromptBuilderCharacterTest(unittest.TestCase):
     def test_character_contract_and_ids_are_embedded_in_prompt_payload(self):
         with tempfile.TemporaryDirectory() as td:
