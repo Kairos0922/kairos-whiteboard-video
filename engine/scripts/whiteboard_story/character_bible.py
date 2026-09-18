@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 
-SCHEMA = "whiteboard-story/characters@1"
+SCHEMA = "whiteboard-story/characters@2"
 
 
 def _read_json(path: Path) -> dict | None:
@@ -47,6 +47,42 @@ def load_characters(episode_dir: Path) -> list[dict]:
                 "allowed_variations": ["pose", "expression", "view_angle", "story_props"],
             }]
     return []
+
+
+def _as_list(value) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(x) for x in value if str(x).strip()]
+    return []
+
+
+def reference_images_for_character(episode_dir: Path, character: dict) -> list[Path]:
+    root = Path(episode_dir).resolve()
+    raw = character.get("reference_images") or character.get("reference_image")
+    paths: list[Path] = []
+    for item in _as_list(raw):
+        p = Path(item).expanduser()
+        if not p.is_absolute():
+            p = root / p
+        paths.append(p.resolve())
+    return paths
+
+
+def validate_character_references(episode_dir: Path, chars: list[dict]) -> list[str]:
+    errors: list[str] = []
+    for c in chars:
+        cid = str(c.get("id") or "").strip()
+        refs = reference_images_for_character(episode_dir, c)
+        if not refs:
+            errors.append(f"{cid} 缺 reference_images：跨幕人物必须有视觉母版参考图")
+            continue
+        for ref in refs:
+            if not ref.exists():
+                errors.append(f"{cid} 参考图不存在：{ref}")
+            elif ref.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+                errors.append(f"{cid} 参考图格式不支持：{ref.name}")
+    return errors
 
 
 def validate_characters(chars: list[dict]) -> list[str]:
@@ -128,6 +164,17 @@ def scene_character_ids(scene: dict) -> list[str]:
             ids.append(str(cid))
     # 保持声明顺序、去重
     return list(dict.fromkeys(ids))
+
+
+def character_reference_manifest(episode_dir: Path, chars: list[dict], character_ids: list[str] | None = None) -> list[dict]:
+    wanted = set(str(x) for x in (character_ids or []) if str(x).strip())
+    selected = [c for c in chars if not wanted or str(c.get("id")) in wanted]
+    return [{
+        "character_id": str(c.get("id")),
+        "name": str(c.get("name") or c.get("id")),
+        "reference_images": [str(p) for p in reference_images_for_character(episode_dir, c)],
+        "canonical_sheet": str((Path(episode_dir) / "input" / "character-sheet.png").resolve())
+    } for c in selected]
 
 
 def build_character_sheet_prompt(chars: list[dict]) -> str:

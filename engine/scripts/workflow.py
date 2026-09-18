@@ -511,11 +511,13 @@ def cmd_prompts(episode_dir: Path, args) -> int:
         if want and sid != want:
             continue
         character_ids = character_bible.scene_character_ids(sc)
+        references = character_bible.character_reference_manifest(episode_dir, chars, character_ids)
         payload = prompt_builder.build_scene_payload(
             sid, sc.get("board_subject") or sc.get("subject") or "", theme,
             n_islands=len(sc.get("elements") or []),
             character_sheet=character_sheet,
-            character_ids=character_ids)
+            character_ids=character_ids,
+            character_references=references)
         dest = out_dir / f"{sid}.prompt.json"
         dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"===== {sid} =====")
@@ -527,10 +529,18 @@ def cmd_prompts(episode_dir: Path, args) -> int:
         return 1
     print(f"\n共 {n} 张。报批通过后，宿主模型一次一张生成 PNG，落到 build/boards/<id>.png，再 import。")
     if chars:
-        ref_prompt = character_bible.build_character_sheet_prompt(chars)
+        ref_prompt = character_bible.build_character_sheet_prompt(chars, theme_name=theme.name)
         ref_path = episode_dir / "input" / "character-sheet.prompt.txt"
         ref_path.write_text(ref_prompt + "\n", encoding="utf-8")
-        print(f"角色圣经：{len(chars)} 个稳定角色；已写 canonical character sheet prompt → {ref_path}")
+        manifest = character_bible.character_reference_manifest(episode_dir, chars)
+        manifest_path = episode_dir / "input" / "character-reference-manifest.json"
+        manifest_path.write_text(json.dumps({
+            "schema": character_bible.SCHEMA,
+            "theme": theme.name,
+            "characters": manifest,
+            "canonical_sheet_required": True
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"角色圣经：{len(chars)} 个稳定角色；已写 canonical prompt + reference manifest")
     else:
         print("角色圣经为空：本期若存在跨幕人物，请先填写 input/characters.json，再批量出图。")
     if getattr(args, "theme", None):

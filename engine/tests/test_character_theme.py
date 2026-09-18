@@ -51,6 +51,34 @@ class CharacterBibleTest(unittest.TestCase):
         self.assertEqual(["office-man", "investigator"], ids)
 
 
+    def test_reference_images_are_required_and_manifest_is_real(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "input").mkdir()
+            ref = root / "input" / "office-man.png"
+            ref.write_bytes(b"fake")
+            chars = [{
+                "id": "office-man",
+                "immutable": {"hair": "navy"},
+                "reference_images": ["input/office-man.png"]
+            }]
+            self.assertEqual([], character_bible.validate_character_references(root, chars))
+            manifest = character_bible.character_reference_manifest(root, chars)
+            self.assertEqual(["office-man"], [x["character_id"] for x in manifest])
+            self.assertEqual(str(ref.resolve()), manifest[0]["reference_images"][0])
+
+    def test_missing_reference_is_blocked(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            chars = [{
+                "id": "office-man",
+                "immutable": {"hair": "navy"},
+                "reference_images": ["input/missing.png"]
+            }]
+            errors = character_bible.validate_character_references(root, chars)
+            self.assertTrue(errors)
+            self.assertIn("不存在", errors[0])
+
 class ThemeContractTest(unittest.TestCase):
     def test_default_theme_contract_is_consistent(self):
         theme = REPO_ROOT / "themes" / "chalkboard-chibi"
@@ -104,6 +132,7 @@ class PromptBuilderCharacterTest(unittest.TestCase):
             self.assertIn("CHARACTER DESIGN CONTRACT", payload["prompt"])
             self.assertIn("CHARACTER ID [office-man]", payload["prompt"])
             self.assertEqual(["office-man"], payload["character_ids"])
+            self.assertEqual([], payload["character_references"])
 
 
 if __name__ == "__main__":
