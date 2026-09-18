@@ -581,6 +581,17 @@ def cmd_import(episode_dir: Path, args) -> int:
                     cand = Path(__file__).resolve().parents[2] / rel
                 if cand.exists():
                     theme = cand
+    if theme is not None:
+        theme_check = review_images.validate_theme_package(theme)
+        if not theme_check["ok"]:
+            print("主题包合同未通过，拒绝 import：")
+            for msg in theme_check["errors"]:
+                print(f"  ✗ {msg}")
+            return 3
+        for msg in theme_check["warnings"]:
+            print(f"  ! {msg}")
+    else:
+        print("! 未解析到主题目录：跳过主题合同闸门，但建议显式提供 --theme")
     ids = [b["scene"] for b in state["boards"]]
     if not ids:
         ids = sorted(p.stem for p in boards_dir.glob("scene-*.png"))
