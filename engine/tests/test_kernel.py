@@ -124,6 +124,39 @@ def K_board_strokes(p: Path):
     return board_to_strokes(p)
 
 
+class ContinuousCanvasTest(unittest.TestCase):
+    def test_delta_strokes_ignores_persistent_ink(self):
+        initial = np_img(BG)
+        current = initial.copy()
+        current[80:90, 80:220] = INK
+        initial[80:90, 80:140] = INK
+        pts = np.array([[80, 85], [120, 85], [160, 85], [200, 85]], dtype=np.int32)
+        delta = K._delta_strokes([pts], current, initial)
+        self.assertTrue(delta)
+        self.assertGreaterEqual(delta[0][0, 0], 140)
+        self.assertGreaterEqual(delta[0][-1, 0], 190)
+
+    def test_delta_mask_prevents_old_fill_tasks(self):
+        with tempfile.TemporaryDirectory() as td:
+            b, a, _h = make_fixture(td)
+            board, _ink, skel = K.load_board_layers(b)
+            ann = K.parse_annotation(a)
+            initial = board.copy()
+            # 模拟上一幕已存在左侧圆形色块，本幕只新增右侧区域。
+            initial[180:270, 90:180] = (178, 58, 58)
+            delta = np.ones(board.shape[:2], dtype=bool)
+            delta[:, :300] = False
+            tasks = K.build_tasks(ann.elements, board, K.board_to_strokes(b),
+                                  skeleton=skel, delta_mask=delta)
+            for task in tasks:
+                if task.kind == "draw" and task.pts is not None:
+                    self.assertTrue(np.all(delta[
+                        np.clip(task.pts[:, 1], 0, H - 1),
+                        np.clip(task.pts[:, 0], 0, W - 1)]),
+                        "continuous scene must not schedule old-region ink")
+
+
+
 class RenderSmokeTest(unittest.TestCase):
     def test_full_chain_small(self):
         with tempfile.TemporaryDirectory() as td:
