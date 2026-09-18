@@ -48,6 +48,8 @@ CLUSTER_DILATE = 18              # 对象聚类膨胀半径 px（连通域判定
                                 # 等间距 <18px 的部分视为同一对象，避免人物被拆成多组导致骷髅头）
 DETAIL_MAX_LEN = 70              # 弧长 < 此值且 bbox < DETAIL_MAX_BOX 的描线判为细节
 DETAIL_MAX_BOX = 50              # （五官/腮红/小装饰）：排到本组填色之后上墨，
+NESTED_DETAIL_RATIO = 0.72        # 内嵌轮廓若明显落在更大轮廓内部，视为人物/图标细节，
+                                  # 即使自身弧长较长也延后，避免“脸圈先出来=骷髅”中间态。
                                 # 杜绝"脸还是板底深色、眼眶先出"的骷髅中间态
 LABEL_FADE_MS = 300              # 标签随所属岛画完淡入的时长（废 chrome 常驻：
                                 # 标签未画先挂是"黑板上一直有三个字"的根因）
@@ -61,6 +63,7 @@ FADE_IN_MS = 700                 # 幕首自上一幕板面淡入背景的时长
                                 # 380ms 太短读起来像硬切）
 HAND_FADE_MS = 240               # 手出入画淡入淡出时长（硬切会弹跳感）
 HAND_LEAD_MS = 350               # 落笔前这么久手才淡入：空档/位移段手一律离画，
+HAND_SETTLE_MS = 180              # 最后一笔结束后短暂停笔，给旁白尾音一个视觉锚点。
                                 # 杜绝"手拿着粉笔来回动却不落墨"的空转观感
 
 
@@ -432,6 +435,40 @@ def _schedule_group(eid: str, start_ms: int, end_ms: int,
             tk.start_ms, tk.end_ms = s, max(e, s + 1)
 
 
+def _stroke_bbox(pts: np.ndarray) -> tuple[int, int, int, int]:
+    """Return inclusive-ish stroke bbox as x, y, w, h."""
+    x0, x1 = int(pts[:, 0].min()), int(pts[:, 0].max())
+    y0, y1 = int(pts[:, 1].min()), int(pts[:, 1].max())
+    return x0, y0, max(1, x1 - x0 + 1), max(1, y1 - y0 + 1)
+
+
+def _nested_outline_ids(outlines: list[tuple]) -> set[int]:
+    """Find outlines substantially contained by a larger outline bbox.
+
+    This is intentionally geometry-only because current annotations do not carry
+    reliable character-part semantics. A nested compact contour (face/eye/badge/
+    icon detail) should not be exposed before its enclosing contour/fill.
+    """
+    boxes = [(p, _stroke_bbox(p[0])) for p in outlines]
+    nested: set[int] = set()
+    for i, (p, (x, y, w, h)) in enumerate(boxes):
+        area = float(w * h)
+        if area <= 0:
+            continue
+        for j, (_q, (ox, oy, ow, oh)) in enumerate(boxes):
+            if i == j or ow * oh <= area:
+                continue
+            ix0, iy0 = max(x, ox), max(y, oy)
+            ix1, iy1 = min(x + w, ox + ow), min(y + h, oy + oh)
+            inter = max(0, ix1 - ix0) * max(0, iy1 - iy0)
+            if inter / area < NESTED_DETAIL_RATIO:
+                continue
+            if area <= ow * oh * 0.55:
+                nested.add(id(p))
+                break
+    return nested
+
+
 def _object_groups(prep: list, el: Element) -> list[list]:
     """把单元内笔画集合按连通域聚成对象组，阅读顺序（上→下、左→右）返回。
 
@@ -682,11 +719,17 @@ def build_tasks(elements: list[Element], board: np.ndarray,
             group_outlines = [p for p in group if id(p) in o_ids]
             group_fills = [p for p in group if id(p) not in o_ids]
             main_outlines, detail_outlines = [], []
+            nested_ids = _nested_outline_ids(group_outlines)
             for p in group_outlines:
                 pts, cum = p[0], p[1]
                 bw = int(pts[:, 0].max() - pts[:, 0].min() + 1)
                 bh = int(pts[:, 1].max() - pts[:, 1].min() + 1)
-                if float(cum[-1]) < DETAIL_MAX_LEN and bw < DETAIL_MAX_BOX and bh < DETAIL_MAX_BOX:
+                is_small_detail = (
+                    float(cum[-1]) < DETAIL_MAX_LEN
+                    and bw < DETAIL_MAX_BOX
+                    and bh < DETAIL_MAX_BOX
+                )
+                if is_small_detail or id(p) in nested_ids:
                     detail_outlines.append(p)
                 else:
                     main_outlines.append(p)
@@ -1061,8 +1104,12 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
             else:
                 while ink_i < len(ink_starts) and ink_starts[ink_i] <= t_ms:
                     ink_i += 1
-                hand_visible = (ink_i < len(ink_starts)
-                                and ink_starts[ink_i] - t_ms <= HAND_LEAD_MS)
+                hand_visible = (
+                    draw_end > 0 and draw_end <= t_ms < draw_end + HAND_SETTLE_MS
+                ) or (
+                    ink_i < len(ink_starts)
+                    and ink_starts[ink_i] - t_ms <= HAND_LEAD_MS
+                )
 
             # 幕首淡入：从上一幕板面淡出到背景色（擦黑板式切幕；首笔最早 1050ms，
             # 与淡入窗不重叠，不会覆盖已画内容）
