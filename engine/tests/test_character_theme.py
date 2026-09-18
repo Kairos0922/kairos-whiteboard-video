@@ -76,6 +76,17 @@ class ThemeContractCompatibilityTest(unittest.TestCase):
             self.assertTrue(result["ok"], result)
             self.assertTrue(result["warnings"])
 
+class CharacterReferenceGateTest(unittest.TestCase):
+    def test_unknown_scene_character_id_is_blocked(self):
+        chars = [{
+            "id": "office-man",
+            "immutable": {"hair": "navy", "face": "peach"}
+        }]
+        scenes = [{"id": "scene-01", "character_ids": ["unknown-person"]}]
+        errors = character_bible.validate_scene_refs(chars, scenes)
+        self.assertTrue(errors)
+        self.assertIn("unknown-person", errors[0])
+
 class PromptBuilderCharacterTest(unittest.TestCase):
     def test_character_contract_and_ids_are_embedded_in_prompt_payload(self):
         with tempfile.TemporaryDirectory() as td:
