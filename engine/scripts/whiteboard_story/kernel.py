@@ -719,13 +719,49 @@ def _hand_tip(hand_png: Path, img_size: tuple[int, int]) -> tuple[int, int]:
     return (int(img_size[0] * HAND_TIP_RATIO[0]), int(img_size[1] * HAND_TIP_RATIO[1]))
 
 
+def _delta_strokes(strokes: list[np.ndarray], current: np.ndarray,
+                   initial: np.ndarray) -> list[np.ndarray]:
+    """Return only stroke segments that are new on a persistent whiteboard.
+
+    Scene boards remain complete illustrations; the renderer must not redraw ink
+    that already exists on the previous scene's canvas.
+    """
+    import cv2
+    if current.shape != initial.shape:
+        return strokes
+    ink_now = extract_ink_mask(current)
+    ink_old = extract_ink_mask(initial)
+    old_dilated = cv2.dilate(ink_old.astype(np.uint8),
+                             np.ones((7, 7), np.uint8)).astype(bool)
+    delta = ink_now & ~old_dilated
+    changed = (np.abs(current.astype(np.int16) - initial.astype(np.int16)).sum(axis=2) > 90)
+    delta |= changed & ink_now
+    delta = cv2.dilate(delta.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+    out: list[np.ndarray] = []
+    for s in strokes:
+        keep = delta[np.clip(s[:, 1], 0, delta.shape[0]-1),
+                     np.clip(s[:, 0], 0, delta.shape[1]-1)]
+        if not keep.any():
+            continue
+        bounds = np.where(np.diff(keep.astype(np.int8)) != 0)[0] + 1
+        start = 0
+        state = bool(keep[0])
+        for end in list(bounds) + [len(s)]:
+            if state and end - start >= 2:
+                out.append(s[start:end])
+            start = end
+            state = not state
+    return out
+
+
 def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
                         hand_png: Path, fps: int = 30,
                         total_ms: int | None = None,
                         overlay_png: Path | None = None,
                         fade_from_png: Path | None = None,
                         hand_follow: float = 1.0,
-                        labels_json: Path | None = None) -> Path:
+                        labels_json: Path | None = None,
+                        initial_board_png: Path | None = None) -> Path:
     """单幕渲染入口：区域时序揭示 + 描线/填色 + 手部贴笔尖 → H.264 MP4。
 
     board_png = 内容原图（墨迹来源）；overlay_png = 版式 overlay（raw + 标签文字）。
@@ -776,6 +812,14 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
         if pb.shape == board.shape:
             prev_board = pb
 
+    initial_board = None
+    if initial_board_png is not None and Path(initial_board_png).exists():
+        ib = np.asarray(Image.open(initial_board_png).convert("RGB"))
+        if ib.shape == board.shape:
+            initial_board = ib
+    elif prev_board is not None:
+        initial_board = prev_board
+
     content_elements = [e for e in ann.elements if e.eid != "layout"]
 
     # 在 build_tasks 之前清除 board 中 MOVE 物体的原始位置，并重新生成 ink/skeleton。
@@ -802,12 +846,14 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
         if _ink.any():
             skel = zhang_suen_skeleton(_ink)
 
-    tasks = build_tasks(content_elements, board, _trace_merged(skel, (w, h)),
-                        skeleton=skel)
-    if not any(t.kind == "draw" for t in tasks):
+    strokes_for_tasks = _trace_merged(skel, (w, h))
+    if initial_board is not None:
+        strokes_for_tasks = _delta_strokes(strokes_for_tasks, board, initial_board)
+    tasks = build_tasks(content_elements, board, strokes_for_tasks, skeleton=skel)
+    if not any(t.kind == "draw" for t in tasks) and initial_board is None:
         raise RuntimeError("时序编排结果为零绘制任务")
-    # draw_end 包含所有任务（draw + move），确保 MOVE 执行期间不被整图兜底重置
-    draw_end = max(t.end_ms for t in tasks)
+    draw_tasks = [t for t in tasks if t.kind == "draw"]
+    draw_end = max((t.end_ms for t in draw_tasks), default=0)
 
     # 标签揭示时刻 = 所属 panel 最后一个任务的结束时间（随岛画完淡入）
     if labels:
@@ -854,8 +900,8 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
     bg = estimate_bg(board)
     bg_arr = np.array(bg, dtype=np.float32)
     canvas = np.empty_like(board)
-    canvas[:] = bg
-    if chrome_mask is not None:
+    canvas[:] = initial_board if initial_board is not None else bg
+    if chrome_mask is not None and initial_board is None:
         canvas[chrome_mask] = base[chrome_mask]
     complete = False                      # 进入收尾整图态后不再回退
     hand_img = Image.open(hand_png).convert("RGBA")
@@ -967,7 +1013,7 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
 
             # 幕首淡入：从上一幕板面淡出到背景色（擦黑板式切幕；首笔最早 1050ms，
             # 与淡入窗不重叠，不会覆盖已画内容）
-            if prev_board is not None and t_ms < FADE_IN_MS and not complete:
+            if prev_board is not None and initial_board is None and t_ms < FADE_IN_MS and not complete:
                 # 时钟前推一帧让窗口末帧 k 恰为 1：否则末帧 (1-k)≈0.7% 的上一幕残影
                 # 会留在 canvas 上直到收尾整图兜底（平坦帧编码为 skip，残影不刷新）
                 k = ease_in_out(min(1.0, (t_ms + 1000.0 / fps) / FADE_IN_MS))
@@ -977,7 +1023,8 @@ def render_region_scene(board_png: Path, annotation_json: Path, out_mp4: Path,
                     canvas[chrome_mask] = base[chrome_mask]
 
             if not complete and t_ms >= draw_end:
-                canvas[:] = base                     # 整图兜底，消除骨架/行距漏像素
+                if initial_board is None:
+                    canvas[:] = base
                 complete = True
 
             # 标签揭示：随所属岛画完淡入，最后合成保证不被后续笔画覆盖
