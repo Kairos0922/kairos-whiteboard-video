@@ -22,6 +22,61 @@ MIN_LONG_EDGE = 1920
 ASPECT = 16.0 / 9.0
 ASPECT_TOL = 0.03              # 「16:9 家族」准入带宽：宿主常出 1792×1024（=1.75，差 0.028）
 
+THEME_REQUIRED_FILES = ("theme.json", "style-block.txt", "probe.json", "character-contract.txt")
+
+
+def validate_theme_package(theme_dir: Path) -> dict:
+    """校验主题包的机器可读配置、提示词合同和探针是否同源。"""
+    root = Path(theme_dir)
+    errors: list[str] = []
+    warnings: list[str] = []
+    missing = [name for name in THEME_REQUIRED_FILES if not (root / name).exists()]
+    if missing:
+        errors.append("主题缺文件：" + ", ".join(missing))
+        return {"ok": False, "errors": errors, "warnings": warnings}
+
+    try:
+        theme = json.loads((root / "theme.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"ok": False, "errors": [f"theme.json 无法解析：{exc}"], "warnings": []}
+
+    style = (root / "style-block.txt").read_text(encoding="utf-8").upper()
+    contract = (root / "character-contract.txt").read_text(encoding="utf-8").upper()
+    palette = theme.get("palette") or {}
+    for key, value in palette.items():
+        if str(value).upper() not in style and str(value).upper() not in contract:
+            errors.append(f"palette.{key}={value} 未出现在 style contract 中")
+    sc = theme.get("style_contract") or {}
+    for group in ("background", "linework", "fills"):
+        values = sc.get(group) or {}
+        for key, value in values.items():
+            if isinstance(value, str) and value.startswith("#") and value.upper() not in style and value.upper() not in contract:
+                errors.append(f"style_contract.{group}.{key}={value} 未出现在提示词合同中")
+
+    try:
+        probe = json.loads((root / "probe.json").read_text(encoding="utf-8"))
+        subject = str(probe.get("subject") or "")
+    except (OSError, json.JSONDecodeError) as exc:
+        subject = ""
+        errors.append(f"probe.json 无法解析：{exc}")
+
+    # 这个冲突曾直接导致默认主题不稳定：probe 说人物头发/外套是 board-green，
+    # style-block 又说 hair/outerwear 用 navy。探针必须服从冻结主题合同。
+    legacy_conflicts = (
+        "board-negative hair",
+        "board-negative hair and suit",
+        "hair and suit treatment",
+        "hair and jacket treatment",
+    )
+    for phrase in legacy_conflicts:
+        if phrase.lower() in subject.lower():
+            errors.append(f"probe 与主题人物合同冲突：包含旧规则 “{phrase}”")
+
+    if "uniform" not in style.lower() or "#153A32" not in style:
+        warnings.append("主题提示词未明确统一板底色；可能出现渐变/脏板底")
+    return {"ok": not errors, "errors": errors, "warnings": warnings}
+
+
 
 def _hex_to_bgr(hex_color: str) -> np.ndarray:
     h = hex_color.lstrip("#")
