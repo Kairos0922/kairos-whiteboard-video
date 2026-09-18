@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from whiteboard_story import character_bible
+
 WIDTH, HEIGHT = 1920, 1080
 
 # 揭示岛纪律：内核按分区矩形归属笔画，罩不住的笔画会被丢弃，所以板面必须能切成
@@ -30,13 +32,24 @@ def load_style_block(theme_dir: Path) -> str:
     return f.read_text(encoding="utf-8").strip()
 
 
+def load_character_contract(theme_dir: Path) -> str:
+    f = Path(theme_dir) / "character-contract.txt"
+    if not f.exists():
+        return ""
+    return f.read_text(encoding="utf-8").strip()
+
+
 def build_scene_payload(scene_id: str, subject: str, theme_dir: Path,
                         n_islands: int | None = None,
-                        character_sheet: str | None = None) -> dict:
+                        character_sheet: str | None = None,
+                        character_ids: list[str] | None = None) -> dict:
     subject = (subject or "").strip()
     if not subject:
         raise ValueError(f"{scene_id} 缺 board_subject")
     parts = [load_style_block(theme_dir)]
+    contract = load_character_contract(theme_dir)
+    if contract:
+        parts.append(contract)
     if character_sheet and character_sheet.strip():
         parts.append(character_sheet.strip())
     parts.append(subject)
@@ -53,6 +66,7 @@ def build_scene_payload(scene_id: str, subject: str, theme_dir: Path,
         "width": WIDTH,
         "height": HEIGHT,
         "theme": Path(theme_dir).name,
+        "character_ids": list(character_ids or []),
     }
 
 

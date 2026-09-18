@@ -2,19 +2,39 @@
   "id": "chalkboard-chibi",
   "name": "黑板粉笔 Q 版讲解",
   "renderer_mode": "chalk",
-  "resolution": [
-    1920,
-    1080
-  ],
+  "resolution": [1920, 1080],
   "style_block": {
     "frozen": true,
-    "status": "frozen"
+    "status": "frozen",
+    "version": 2
   },
   "palette": {
     "board": "#153A32",
     "chalk": "#E5D8BC",
     "risk_and_questions": "#D87B70",
-    "discovery": "#D9B44B"
+    "discovery": "#D9B44B",
+    "ink_navy": "#232B38",
+    "skin_peach": "#F4B47D",
+    "muted_violet": "#675282"
+  },
+  "style_contract": {
+    "background": {
+      "color": "#153A32",
+      "uniform": true,
+      "max_corner_delta": 12
+    },
+    "linework": {
+      "color": "#E5D8BC",
+      "description": "fine, steady, narrow ivory chalk contour with almost no grain"
+    },
+    "fills": {
+      "hair_and_outerwear": "#232B38",
+      "skin": "#F4B47D",
+      "inner_layer": "#675282",
+      "questions_warnings": "#D87B70",
+      "discovery": "#D9B44B"
+    },
+    "character_contract": "character-contract.txt"
   },
   "hands": [
     {
