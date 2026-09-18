@@ -481,6 +481,14 @@ def cmd_prompts(episode_dir: Path, args) -> int:
     if theme is None or not theme.exists():
         print("缺主题目录：--theme themes/<id> 或先在 voice 时登记 state.theme")
         return 1
+    theme_check = review_images.validate_theme_package(theme)
+    if not theme_check["ok"]:
+        print("主题包合同未通过：")
+        for msg in theme_check["errors"]:
+            print(f"  ✗ {msg}")
+        return 1
+    for msg in theme_check["warnings"]:
+        print(f"  ! {msg}")
     script = episode_dir / "input" / "script.json"
     if not script.exists():
         print(f"缺 {script}")
@@ -540,6 +548,12 @@ def cmd_probe(args) -> int:
         theme = theme.parent
     if not theme.exists():
         print(f"主题目录不存在：{theme}")
+        return 1
+    theme_check = review_images.validate_theme_package(theme)
+    if not theme_check["ok"]:
+        print("主题包合同未通过：")
+        for msg in theme_check["errors"]:
+            print(f"  ✗ {msg}")
         return 1
     payload = prompt_builder.probe_payload(theme)
     print(payload["prompt"])
