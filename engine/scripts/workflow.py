@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from whiteboard_story import ir_contract, prompt_builder, review_images  # noqa: E402
+from whiteboard_story import character_bible, ir_contract, prompt_builder, review_images  # noqa: E402
 
 SCHEMA = "whiteboard-story-video/state@2"
 EXPRESS_TEMPLATE = Path(__file__).resolve().parents[1] / "assets/templates/express-card.template.md"
@@ -117,6 +117,11 @@ def cmd_init(episode_dir: Path, title: str, args) -> int:
         express.write_text(EXPRESS_TEMPLATE.read_text(encoding="utf-8")
                            .replace("{{TITLE}}", title)
                            .replace("{{DATE}}", _now()[:10]), encoding="utf-8")
+    # 角色圣经：项目级永久身份键。存在即复用，不按幕重新发明角色。
+    chars_template = Path(__file__).resolve().parents[1] / "assets/templates/characters.json"
+    chars_path = episode_dir / "input" / "characters.json"
+    if chars_template.exists() and not chars_path.exists():
+        chars_path.write_text(chars_template.read_text(encoding="utf-8"), encoding="utf-8")
     n = getattr(args, "scenes", None)
     if n is not None and n < 1:
         print("--scenes 必须 ≥ 1")
@@ -481,9 +486,14 @@ def cmd_prompts(episode_dir: Path, args) -> int:
         print(f"缺 {script}")
         return 1
     scenes = json.loads(script.read_text(encoding="utf-8")).get("scenes", [])
-    chars_file = episode_dir / "input" / "characters.txt"
-    character_sheet = (chars_file.read_text(encoding="utf-8")
-                       if chars_file.exists() else None)
+    chars = character_bible.load_characters(episode_dir)
+    char_errors = character_bible.validate_characters(chars)
+    if char_errors:
+        print("角色圣经校验：")
+        for msg in char_errors:
+            print(f"  ✗ {msg}")
+        return 1
+    character_sheet = character_bible.render_prompt_block(chars)
     want = getattr(args, "scene", None)
     out_dir = episode_dir / "input" / "prompts"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -492,10 +502,12 @@ def cmd_prompts(episode_dir: Path, args) -> int:
         sid = sc.get("id") or f"scene-{i + 1:02d}"
         if want and sid != want:
             continue
+        character_ids = character_bible.scene_character_ids(sc)
         payload = prompt_builder.build_scene_payload(
             sid, sc.get("board_subject") or sc.get("subject") or "", theme,
             n_islands=len(sc.get("elements") or []),
-            character_sheet=character_sheet)
+            character_sheet=character_sheet,
+            character_ids=character_ids)
         dest = out_dir / f"{sid}.prompt.json"
         dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"===== {sid} =====")
@@ -506,6 +518,13 @@ def cmd_prompts(episode_dir: Path, args) -> int:
         print(f"脚本里没有 {want}")
         return 1
     print(f"\n共 {n} 张。报批通过后，宿主模型一次一张生成 PNG，落到 build/boards/<id>.png，再 import。")
+    if chars:
+        ref_prompt = character_bible.build_character_sheet_prompt(chars)
+        ref_path = episode_dir / "input" / "character-sheet.prompt.txt"
+        ref_path.write_text(ref_prompt + "\n", encoding="utf-8")
+        print(f"角色圣经：{len(chars)} 个稳定角色；已写 canonical character sheet prompt → {ref_path}")
+    else:
+        print("角色圣经为空：本期若存在跨幕人物，请先填写 input/characters.json，再批量出图。")
     if getattr(args, "theme", None):
         # 统一存储绝对路径：--theme 按当前工作目录写（../themes/<id>），这里已验证它存在，
         # 若改按 episode_dir 为基准拼接会存进一个不存在的目录，voice/render 才炸。
