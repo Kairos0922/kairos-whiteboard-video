@@ -511,11 +511,13 @@ def cmd_prompts(episode_dir: Path, args) -> int:
         if want and sid != want:
             continue
         character_ids = character_bible.scene_character_ids(sc)
+        references = character_bible.character_reference_manifest(episode_dir, chars, character_ids)
         payload = prompt_builder.build_scene_payload(
             sid, sc.get("board_subject") or sc.get("subject") or "", theme,
             n_islands=len(sc.get("elements") or []),
             character_sheet=character_sheet,
-            character_ids=character_ids)
+            character_ids=character_ids,
+            character_references=references)
         dest = out_dir / f"{sid}.prompt.json"
         dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"===== {sid} =====")
