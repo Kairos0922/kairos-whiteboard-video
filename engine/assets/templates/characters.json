@@ -1,5 +1,5 @@
 {
-  "schema": "whiteboard-story/characters@1",
+  "schema": "whiteboard-story/characters@2",
   "version": 1,
   "_note": "填写全片会反复出现的人物。id 在整个视频中永久不变；immutable 是不可变视觉锚点。",
   "characters": []
