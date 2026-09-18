@@ -142,3 +142,16 @@ def build_character_sheet_prompt(chars: list[dict]) -> str:
         "separated. This sheet is the canonical appearance reference for every later scene.\n\n"
         + block
     )
+
+
+def validate_scene_refs(chars: list[dict], scenes: list[dict]) -> list[str]:
+    """检查脚本引用的 character_id 是否都存在于角色圣经。"""
+    known = {str(c.get("id")) for c in chars if c.get("id")}
+    errors: list[str] = []
+    for i, scene in enumerate(scenes):
+        sid = str(scene.get("id") or f"scene-{i + 1:02d}")
+        refs = scene_character_ids(scene)
+        missing = [cid for cid in refs if cid not in known]
+        if missing:
+            errors.append(f"{sid} 引用了未知 character_id：{', '.join(missing)}")
+    return errors
