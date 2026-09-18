@@ -42,7 +42,8 @@ def load_character_contract(theme_dir: Path) -> str:
 def build_scene_payload(scene_id: str, subject: str, theme_dir: Path,
                         n_islands: int | None = None,
                         character_sheet: str | None = None,
-                        character_ids: list[str] | None = None) -> dict:
+                        character_ids: list[str] | None = None,
+                        character_references: list[dict] | None = None) -> dict:
     subject = (subject or "").strip()
     if not subject:
         raise ValueError(f"{scene_id} 缺 board_subject")
@@ -52,6 +53,19 @@ def build_scene_payload(scene_id: str, subject: str, theme_dir: Path,
         parts.append(contract)
     if character_sheet and character_sheet.strip():
         parts.append(character_sheet.strip())
+    if character_references:
+        ref_lines = [
+            "REFERENCE IMAGE INPUTS — USE THESE AS THE PRIMARY IDENTITY SOURCE:",
+            "For each referenced character, the host image model should attach/use the listed reference image(s) "
+            "when supported. The canonical sheet is the fallback master. Do not redraw identity from text alone."
+        ]
+        for ref in character_references:
+            ref_lines.append(
+                f"- CHARACTER [{ref.get('character_id')}]: " +
+                ", ".join(ref.get("reference_images") or []) +
+                f" | CANONICAL SHEET: {ref.get('canonical_sheet')}"
+            )
+        parts.append("\n".join(ref_lines))
     parts.append(subject)
     if n_islands and n_islands > 1:
         parts.append(_ISLAND_RULE.format(n=n_islands))
@@ -67,6 +81,7 @@ def build_scene_payload(scene_id: str, subject: str, theme_dir: Path,
         "height": HEIGHT,
         "theme": Path(theme_dir).name,
         "character_ids": list(character_ids or []),
+        "character_references": list(character_references or []),
     }
 
 
