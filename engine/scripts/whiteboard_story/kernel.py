@@ -615,6 +615,10 @@ def build_tasks(elements: list[Element], board: np.ndarray,
         outlines = _clip_strokes(
             sorted(by_elem.get(el.eid, []), key=lambda s: _arc_cum(s)[1], reverse=True),
             el.protected)
+        if delta_mask is not None:
+            # 描线同样必须裁成“新增墨迹段”。否则一条跨越旧内容/新内容的骨架线
+            # 会把旧笔画带回本幕，造成重描和视觉鬼影。
+            outlines = _mask_strokes(outlines, delta_mask, min_points=2)
         # 碎段治理（修"手来回扫却不落墨"）：先剔除贴线平行残段（重描零新墨），
         # 再把同一粉笔行的共线碎段接成连续折线（单任务恒速走完）
         outlines = _drop_covered(outlines)
@@ -735,6 +739,26 @@ def _hand_tip(hand_png: Path, img_size: tuple[int, int]) -> tuple[int, int]:
         except (OSError, json.JSONDecodeError, KeyError, ValueError):
             pass
     return (int(img_size[0] * HAND_TIP_RATIO[0]), int(img_size[1] * HAND_TIP_RATIO[1]))
+
+
+def _mask_strokes(strokes: list[np.ndarray], mask: np.ndarray,
+                 min_points: int = 2) -> list[np.ndarray]:
+    """Split polylines into contiguous portions covered by mask."""
+    out: list[np.ndarray] = []
+    h, w = mask.shape[:2]
+    for s in strokes:
+        if len(s) < min_points:
+            continue
+        keep = mask[np.clip(s[:, 1], 0, h - 1), np.clip(s[:, 0], 0, w - 1)]
+        bounds = np.where(np.diff(keep.astype(np.int8)) != 0)[0] + 1
+        start = 0
+        state = bool(keep[0])
+        for end in list(bounds) + [len(s)]:
+            if state and end - start >= min_points:
+                out.append(s[start:end])
+            start = end
+            state = not state
+    return out
 
 
 def _delta_strokes(strokes: list[np.ndarray], current: np.ndarray,
