@@ -132,6 +132,7 @@ class PromptBuilderCharacterTest(unittest.TestCase):
             self.assertIn("CHARACTER DESIGN CONTRACT", payload["prompt"])
             self.assertIn("CHARACTER ID [office-man]", payload["prompt"])
             self.assertEqual(["office-man"], payload["character_ids"])
+            self.assertEqual([], payload["character_references"])
 
 
 if __name__ == "__main__":
