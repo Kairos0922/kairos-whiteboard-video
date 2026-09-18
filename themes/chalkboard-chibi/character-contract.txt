@@ -1,0 +1,25 @@
+CHARACTER DESIGN CONTRACT — DEFAULT THEME — HARD
+Every recurring human must read as the same compact anime-information-story character family.
+Identity is preserved by silhouette first, then hair mass, face taper, eye construction, glasses/accessory shape,
+outfit silhouette, and the three-color accent system.
+
+Human faces are never a bare circle or oval. Every face has:
+- a softly tapered warm-peach face fill (#F4B47D);
+- an ink-navy hair mass (#232B38) with grouped fringe or a deliberate long-hair silhouette;
+- two solid dark eyes with exactly one tiny ivory highlight dot each;
+- one simple ivory/dark mouth stroke;
+- small round muted-coral blush under both eyes (#D87B70).
+
+Recurring office/explainer characters keep:
+- ink-navy hair and outerwear (#232B38), not board-green hair/jackets;
+- a visible ivory shirt triangle (#E5D8BC);
+- the same muted-violet tie/inner layer (#675282) unless the character bible explicitly fixes another accessory;
+- rectangular dark-rim glasses when the canonical character wears glasses;
+- compact chibi proportions: large head, short torso, simplified hands, stable shoulder width.
+
+Allowed across scenes: pose, gesture, expression, camera/view angle, and story-specific props.
+Not allowed: redesigning hair silhouette, switching outfit family, changing skin or hair color, swapping glasses shape,
+changing age/body type, introducing gradients or glossy rendering, or replacing the character with an unrelated icon.
+
+For tiny diagram people, preserve the same hair mass + tapered peach face + two eyes + blush + outfit accent.
+Simplification means fewer interior lines, never a new face geometry.
