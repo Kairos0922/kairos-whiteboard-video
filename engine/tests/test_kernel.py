@@ -168,8 +168,8 @@ class SemanticRevealTest(unittest.TestCase):
         cum_f, _ = K._arc_cum(face)
         prep = [(outer, cum_o, float(cum_o[-1])), (face, cum_f, float(cum_f[-1]))]
         nested = K._nested_outline_ids(prep)
-        self.assertIn(id(face), nested)
-        self.assertNotIn(id(outer), nested)
+        self.assertIn(id(prep[1]), nested)
+        self.assertNotIn(id(prep[0]), nested)
 
     def test_nested_detail_is_not_scheduled_before_fill(self):
         # A character-like object: large body/head contour + smaller face contour + fill.
@@ -183,8 +183,8 @@ class SemanticRevealTest(unittest.TestCase):
         nested = K._nested_outline_ids([prep[0], prep[1]])
         main = [p for p in [prep[0], prep[1]] if id(p) not in nested]
         detail = [p for p in [prep[0], prep[1]] if id(p) in nested]
-        self.assertEqual([id(outer)], [id(p) for p in main])
-        self.assertEqual([id(face)], [id(p) for p in detail])
+        self.assertEqual([id(prep[0])], [id(p) for p in main])
+        self.assertEqual([id(prep[1])], [id(p) for p in detail])
 
 
 class RenderSmokeTest(unittest.TestCase):
