@@ -44,8 +44,9 @@ def test_default_theme_contract_is_complete() -> None:
     assert config.get("renderer_mode")
     assert config.get("resolution") == default["resolution"]
     assert config.get("palette")
-    assert config.get("hand")
-    assert config.get("character")
+    assert config.get("hands")
+    assert config.get("style_contract", {}).get("character_contract")
+    assert config.get("reference_contract", {}).get("generated_board_must_not_include_hand") is True
 
 
 def test_skill_routes_engineering_details_to_canonical_document() -> None:
