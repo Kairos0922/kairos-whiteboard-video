@@ -414,6 +414,8 @@ uv run python scripts/workflow.py confirm-final \
 | `sync-boards` | 根据 `script.json` 同步 Scene 列表 |
 | `voice` | 生成 TTS 与词级时间戳 |
 | `confirm-voice` | 兼容旧流程的语音状态命令 |
+| `character-sheet` | 生成 canonical character sheet prompt |
+| `import-character-sheet` | 导入并固定 canonical character sheet |
 | `prompts` | 生成宿主模型使用的板图 prompt |
 | `probe` | 运行主题探针 |
 | `lint` | 校验知识 / 学习者 / Beat / 表达 IR |
