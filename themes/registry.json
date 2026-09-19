@@ -6,7 +6,11 @@
       "name": "黑板粉笔 Q 版讲解",
       "path": "themes/chalkboard-chibi",
       "renderer_mode": "chalk",
-      "resolution": [1920, 1080]
+      "resolution": [
+        1920,
+        1080
+      ],
+      "default": true
     }
   ]
 }
