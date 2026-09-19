@@ -17,6 +17,8 @@ import json
 import sys
 from pathlib import Path
 
+from PIL import Image
+
 
 class ResourceResolver:
     """统一资源定位：以 episode_dir 为基准解析所有相对路径。"""
@@ -96,6 +98,7 @@ class ResourceResolver:
                 for h in hands:
                     f = theme / str(h.get("file", ""))
                     if f.exists():
+                        self._validate_theme_hand(f, theme, h)
                         return f
 
         # 当期 assets（优先粉笔，回退马克笔）
@@ -105,6 +108,40 @@ class ResourceResolver:
                 return legacy
 
         sys.exit("手笔素材不存在（--hand / 主题 hands / assets/hand-*.png 均缺失）")
+
+    @staticmethod
+    def _validate_theme_hand(hand: Path, theme: Path, spec: dict) -> None:
+        """主题声明的手素材是渲染硬依赖：缺失/损坏/锚点失效必须在渲染前阻断。
+
+        默认 chalkboard-chibi 的 hand-chalk 是参考图中的前景手：
+        204×317 RGBA PNG，粉笔尖锚点为原图坐标 [6, 8]。
+        """
+        try:
+            with Image.open(hand) as img:
+                if img.mode != "RGBA":
+                    sys.exit(f"主题手素材必须带 alpha（RGBA）：{hand}，实际 {img.mode}")
+                expected = spec.get("size")
+                if expected and list(img.size) != list(expected):
+                    sys.exit(
+                        f"主题手素材尺寸不符合 theme.json：{hand} "
+                        f"期望 {expected}，实际 {list(img.size)}"
+                    )
+        except (OSError, ValueError) as exc:
+            sys.exit(f"主题手素材无法读取：{hand}：{exc}")
+
+        tip_path = theme / str(spec.get("tip", ""))
+        if not tip_path.exists():
+            sys.exit(f"主题手素材缺少笔尖锚点 sidecar：{tip_path}")
+        try:
+            tip = json.loads(tip_path.read_text(encoding="utf-8")).get("tip")
+            if not isinstance(tip, list) or len(tip) != 2:
+                raise ValueError("tip 必须是 [x, y]")
+            with Image.open(hand) as img:
+                tx, ty = float(tip[0]), float(tip[1])
+                if not (0 <= tx < img.width and 0 <= ty < img.height):
+                    raise ValueError(f"tip={tip} 超出 {img.size}")
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            sys.exit(f"主题手素材笔尖锚点无效：{tip_path}：{exc}")
 
     # ------------------------------------------------------------------ 内部
 

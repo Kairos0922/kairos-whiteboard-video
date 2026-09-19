@@ -209,7 +209,7 @@ def cmd_render(ep: Path, args) -> int:
                 raw,
                 ep / "build" / "annotations" / f"{sid}.annotation.json",
                 ep / "build" / "scenes" / f"{sid}.mp4",
-                hand, board_style="paper", fps=FPS,
+                hand, board_style="chalk", fps=FPS,
                 overlay_png=ep / "build" / "boards-layout" / f"{sid}.png",
                 fade_from_png=prev,
                 initial_board_png=prev,
