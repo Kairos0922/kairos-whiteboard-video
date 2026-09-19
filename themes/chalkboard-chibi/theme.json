@@ -2,7 +2,10 @@
   "id": "chalkboard-chibi",
   "name": "黑板粉笔 Q 版讲解",
   "renderer_mode": "chalk",
-  "resolution": [1920, 1080],
+  "resolution": [
+    1920,
+    1080
+  ],
   "style_block": {
     "frozen": true,
     "status": "frozen",
@@ -40,7 +43,20 @@
     {
       "id": "hand-chalk",
       "file": "hands/hand-chalk.png",
-      "tip": "hands/hand-chalk.tip.json"
+      "tip": "hands/hand-chalk.tip.json",
+      "size": [
+        204,
+        317
+      ],
+      "alpha_required": true,
+      "role": "renderer foreground hand holding white chalk; never generated into board image"
     }
-  ]
+  ],
+  "reference_contract": {
+    "source": "supplied reference image",
+    "background": "#153A32",
+    "hand": "hand-chalk",
+    "composition": "airy asymmetric knowledge-story islands with large untouched board space",
+    "generated_board_must_not_include_hand": true
+  }
 }
