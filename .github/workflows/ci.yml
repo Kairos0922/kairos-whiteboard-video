@@ -17,6 +17,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Install dependencies
         run: cd engine && uv sync --frozen
+      - name: Check patch whitespace
+        run: git diff --check HEAD~1 HEAD
       - name: Compile Python sources
         run: cd engine && uv run python -m compileall -q scripts tests
       - name: Run tests
