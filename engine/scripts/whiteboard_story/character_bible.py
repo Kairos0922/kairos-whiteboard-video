@@ -69,14 +69,34 @@ def reference_images_for_character(episode_dir: Path, character: dict) -> list[P
     return paths
 
 
+def canonical_sheet_path(episode_dir: Path) -> Path:
+    return (Path(episode_dir) / "input" / "character-sheet.png").resolve()
+
+
+def validate_canonical_sheet(episode_dir: Path) -> list[str]:
+    """校验项目级 canonical character sheet；它是跨幕身份的视觉母版。"""
+    path = canonical_sheet_path(episode_dir)
+    if not path.exists():
+        return [f"缺 canonical character sheet：{path}；先运行 character-sheet 并导入一张母版图"]
+    if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+        return [f"canonical character sheet 格式不支持：{path.name}"]
+    try:
+        from PIL import Image
+        with Image.open(path) as img:
+            if img.width < 512 or img.height < 512:
+                return [f"canonical character sheet 分辨率过低：{img.size}（至少 512×512）"]
+            img.verify()
+    except Exception as exc:
+        return [f"canonical character sheet 无法读取：{path}：{exc}"]
+    return []
+
+
 def validate_character_references(episode_dir: Path, chars: list[dict]) -> list[str]:
+    """验证可选的单角色参考图；canonical sheet 是必须的项目级母版。"""
     errors: list[str] = []
     for c in chars:
         cid = str(c.get("id") or "").strip()
         refs = reference_images_for_character(episode_dir, c)
-        if not refs:
-            errors.append(f"{cid} 缺 reference_images：跨幕人物必须有视觉母版参考图")
-            continue
         for ref in refs:
             if not ref.exists():
                 errors.append(f"{cid} 参考图不存在：{ref}")
@@ -169,12 +189,13 @@ def scene_character_ids(scene: dict) -> list[str]:
 def character_reference_manifest(episode_dir: Path, chars: list[dict], character_ids: list[str] | None = None) -> list[dict]:
     wanted = set(str(x) for x in (character_ids or []) if str(x).strip())
     selected = [c for c in chars if not wanted or str(c.get("id")) in wanted]
-    canonical = (Path(episode_dir) / "input" / "character-sheet.png").resolve()
+    canonical = canonical_sheet_path(episode_dir)
     return [{
         "character_id": str(c.get("id")),
         "name": str(c.get("name") or c.get("id")),
         "reference_images": [str(p) for p in reference_images_for_character(episode_dir, c)],
         "canonical_sheet": str(canonical) if canonical.exists() else None,
+        "reference_priority": ["canonical_sheet", "reference_images"],
     } for c in selected]
 
 
