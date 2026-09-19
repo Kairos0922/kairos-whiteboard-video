@@ -429,5 +429,65 @@ class PromptBuilderTest(unittest.TestCase):
 # 渲染内核相关测试（原 ChalkThrTest：stream_render 墨迹判定）随内核待补一并暂停，
 # 补回内核时从 git 历史恢复该测试类。
 
+
+
+class ConfirmationGateRegressionTest(unittest.TestCase):
+    """三次确认闸口回归：voice 不能代替 content，visual 必须依赖 content，final 必须完整 QA。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ep = Path(self.tmp.name) / "episode"
+        self.args = type("Args", (), {"scenes": None})()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_confirm_voice_does_not_confirm_content(self):
+        from workflow import cmd_init, cmd_confirm_voice
+        self.assertEqual(cmd_init(self.ep, "voice gate", self.args), 0)
+        inp = self.ep / "input"
+        (inp / "narration.mp3").write_bytes(b"mp3")
+        (inp / "captions.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\n测试。\n", encoding="utf-8")
+        (inp / "words.json").write_text(json.dumps({"words": []}), encoding="utf-8")
+        with unittest.mock.patch("whiteboard_story.providers.voice.compute_voice_fingerprints",
+                                return_value={"narration.mp3": "a", "captions.srt": "b", "words.json": "c"}):
+            self.assertEqual(cmd_confirm_voice(self.ep, type("Args", (), {})()), 0)
+        state = json.loads((self.ep / "state.json").read_text(encoding="utf-8"))
+        self.assertFalse(state["confirmations"]["content_confirmed"])
+        self.assertTrue(state["phases"]["script_audio_confirmed"])
+
+    def test_confirm_visual_requires_content_confirmation(self):
+        from workflow import cmd_init, cmd_confirm_visual
+        self.assertEqual(cmd_init(self.ep, "visual gate", self.args), 0)
+        st = json.loads((self.ep / "state.json").read_text(encoding="utf-8"))
+        st["phases"]["boards_generated"] = True
+        st["phases"]["annotated"] = True
+        st["boards"] = [{"scene": "scene-01", "status": "ok"}]
+        (self.ep / "state.json").write_text(json.dumps(st), encoding="utf-8")
+        self.assertEqual(cmd_confirm_visual(self.ep, type("Args", (), {})()), 3)
+        st2 = json.loads((self.ep / "state.json").read_text(encoding="utf-8"))
+        self.assertFalse(st2["confirmations"]["visual_confirmed"])
+
+    def test_confirm_final_requires_full_qa(self):
+        from workflow import cmd_init, cmd_confirm_final
+        import whiteboard_story.validate as validate_mod
+        import whiteboard_story.qa_gates as qa_gates
+        self.assertEqual(cmd_init(self.ep, "final gate", self.args), 0)
+        (self.ep / "deliverables" / "final.mp4").write_bytes(b"mp4")
+        st = json.loads((self.ep / "state.json").read_text(encoding="utf-8"))
+        st["confirmations"]["visual_confirmed"] = True
+        (self.ep / "state.json").write_text(json.dumps(st), encoding="utf-8")
+
+        with unittest.mock.patch.object(validate_mod, "validate", return_value=(["broken"], [], {})), \
+             unittest.mock.patch.object(qa_gates, "run_all", return_value=([], [], [])):
+            self.assertEqual(cmd_confirm_final(self.ep, type("Args", (), {})()), 3)
+
+        with unittest.mock.patch.object(validate_mod, "validate", return_value=([], [], {})), \
+             unittest.mock.patch.object(qa_gates, "run_all", return_value=([], [], [])):
+            self.assertEqual(cmd_confirm_final(self.ep, type("Args", (), {})()), 0)
+
+        st2 = json.loads((self.ep / "state.json").read_text(encoding="utf-8"))
+        self.assertTrue(st2["confirmations"]["final_confirmed"])
+
 if __name__ == "__main__":
     unittest.main()
