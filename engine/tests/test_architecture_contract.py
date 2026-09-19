@@ -36,7 +36,9 @@ def test_theme_registry_points_to_existing_theme() -> None:
 
 def test_default_theme_contract_is_complete() -> None:
     registry = json.loads((THEMES / "registry.json").read_text(encoding="utf-8"))
-    default = registry["themes"][0]
+    defaults = [entry for entry in registry["themes"] if entry.get("default") is True]
+    assert len(defaults) == 1, "theme registry must declare exactly one default"
+    default = defaults[0]
     theme = ROOT / default["path"]
     config = json.loads((theme / "theme.json").read_text(encoding="utf-8"))
 
