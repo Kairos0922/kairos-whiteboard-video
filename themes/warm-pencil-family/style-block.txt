@@ -1,0 +1,35 @@
+WARM PENCIL FAMILY — STYLE BLOCK
+
+Purpose:
+A warm hand-drawn educational theme for everyday-life explanation, parenting, family relationships, psychology, habits, social observation, and other human-centered topics where lived situations and relationships carry more meaning than abstract diagrams.
+
+Visual identity:
+16:9 educational whiteboard illustration on a warm off-white background (#F7F2E8). Fine colored-pencil contour with a soft dark gray-brown line (#5C554B), slightly organic but controlled. Flat, low-saturation macaron accents only: sky blue (#AFCFE3), soft green (#B7CBA5), pale yellow (#E8D58A), soft pink (#E7B8B5), and light orange (#E8B77C).
+
+The style is a restrained hand-drawn explainer, not a children's storybook plate and not a polished editorial illustration. The drawing should feel like a thoughtful science notebook made for ordinary people: warm, clear, quiet, and easy to follow.
+
+Line language:
+Fine, narrow, continuous colored-pencil contours. Slight natural hand variation is allowed, but lines must remain readable at normal viewing size. Avoid black ink, heavy comic outlines, fuzzy edges, dense pencil noise, watercolor bleeding, glossy vector rendering, photorealism, 3D, and dramatic shadows.
+
+Color hierarchy:
+The warm off-white background is dominant. Most content remains linework. Accent colors are sparse and semantic. Do not fill every object. Avoid rainbow palettes.
+
+Composition:
+Use 1–3 small-to-medium knowledge-story clusters per scene, with substantial untouched negative space. Prefer a clear primary human action and only a few supporting objects. Do not build a giant poster, dense infographic, collage, or fully decorated room.
+
+Visual revelation:
+The board image must be a clean target state that can be progressively drawn. Prefer objects and figures that can be decomposed into simple strokes and fills. Do not pre-draw the entire explanatory conclusion if the scene is meant to reveal it over time.
+
+Human-centered scene language:
+Every recurring human should look like the same family/character system. Everyday gestures, distance, posture, and hand position carry meaning. Emotional states should be subtle and readable through posture rather than exaggerated facial expressions.
+
+Hard background rule:
+The entire canvas uses one uniform warm off-white base (#F7F2E8). No visible paper grain, gray smudge blocks, vignette, gradient, colored corners, heavy texture, or background illustration.
+
+Hard content rules:
+No readable text, letters, numerals, logos, watermarks, UI chrome, decorative borders, or subtitles in generated board images.
+Do not generate the renderer's foreground hand or pencil entering from a frame edge. The renderer supplies the canonical hand asset separately.
+Do not create duplicate limbs, ghost hands, skeletal hands, floating eyes, mask-like faces, or incomplete heads.
+
+Rendering target:
+The result should look coherent when animated as a whiteboard drawing: simple enough to trace, sparse enough to breathe, and expressive enough that the drawing action itself reveals the idea.
