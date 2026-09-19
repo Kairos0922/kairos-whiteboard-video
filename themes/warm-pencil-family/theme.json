@@ -1,0 +1,44 @@
+{
+  "id": "warm-pencil-family",
+  "name": "温暖彩铅家庭讲解",
+  "renderer_mode": "paper",
+  "resolution": [1920, 1080],
+  "style_block": {
+    "frozen": false,
+    "status": "candidate",
+    "version": 1
+  },
+  "applicable_scenarios": [
+    "亲子与家庭生活",
+    "心理与行为习惯",
+    "生活方式与社会观察",
+    "需要通过人物关系、日常动作和情境理解观点的通俗解释",
+    "轻量科普与人文类内容"
+  ],
+  "not_ideal_for": [
+    "高度抽象的技术原理",
+    "复杂数据图表",
+    "需要强烈黑板课堂感的内容"
+  ],
+  "palette": {
+    "paper": "#F7F2E8",
+    "line": "#5C554B",
+    "sky_blue": "#AFCFE3",
+    "soft_green": "#B7CBA5",
+    "pale_yellow": "#E8D58A",
+    "soft_pink": "#E7B8B5",
+    "light_orange": "#E8B77C"
+  },
+  "style_contract": {
+    "background": {"color": "#F7F2E8", "uniform": true},
+    "linework": {"color": "#5C554B", "description": "fine, narrow, controlled colored-pencil contour with slight natural hand variation"},
+    "fills": {"sky_blue": "#AFCFE3", "soft_green": "#B7CBA5", "pale_yellow": "#E8D58A", "soft_pink": "#E7B8B5", "light_orange": "#E8B77C"},
+    "character_contract": "character-contract.txt"
+  },
+  "hands": [],
+  "reference_contract": {
+    "background": "#F7F2E8",
+    "composition": "sparse human-centered knowledge-story clusters with substantial negative space",
+    "generated_board_must_not_include_hand": true
+  }
+}
