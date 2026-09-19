@@ -64,7 +64,7 @@ metadata:
   **三次确认（质量门）的 flag 只能由这三个 confirm-* 命令写**，不要手改 `state.json`：
   `confirm-content`（闸：script.json 存在 + lint 零阻断 → `content_confirmed`）、
   `confirm-visual`（闸：全部板图检查 ok + `annotated` → `visual_confirmed`/`boards_reviewed`）、
-  `confirm-final`（闸：deliverables/final.mp4 存在 → `final_confirmed`）；任一闸门不过返回码 3。
+  `confirm-final`（闸：第2次视觉确认已完成 + `deliverables/final.mp4` 存在 + `validate`/`qa_gates` 完整机器检查零阻断 → `final_confirmed`）；任一闸门不过返回码 3。
   `confirm-boards` 是旧流程别名（同写第2次确认，但不查 `annotated`），新期次一律用 `confirm-visual`。
   关键参数：`init --title <标题> [--scenes N]`
   （init 不吃主题）；`prompts --theme <主题目录> [--scene id]`；`import --boards-dir <目录> [--theme]`
