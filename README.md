@@ -106,6 +106,7 @@ TTS 生成：
 4. `prompts` 对实际引用人物的 Scene 注入 Character Bible + canonical sheet + 可选单角色 reference image。
 5. 如果脚本存在人物引用但 canonical sheet 缺失，`prompts` 直接阻断，不退回“只靠文字描述”。
 
+#### Reference contract
 
 涉及人物的项目使用：
 
