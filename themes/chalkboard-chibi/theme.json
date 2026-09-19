@@ -58,5 +58,15 @@
     "hand": "hand-chalk",
     "composition": "airy asymmetric knowledge-story islands with large untouched board space",
     "generated_board_must_not_include_hand": true
-  }
+  },
+  "applicable_scenarios": [
+    "技术原理与工程机制",
+    "科学知识与概念拆解",
+    "因果关系、流程、结构和数据关系",
+    "需要清晰解释抽象概念的科普与教育内容"
+  ],
+  "not_ideal_for": [
+    "以家庭生活、人物关系和日常情境为主要信息载体的内容",
+    "需要温暖生活感而非课堂讲解感的内容"
+  ]
 }
