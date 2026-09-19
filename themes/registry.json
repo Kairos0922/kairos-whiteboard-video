@@ -17,6 +17,24 @@
         "因果关系、流程、结构和数据关系",
         "抽象概念的科普与教育"
       ]
+    },
+    {
+      "id": "warm-pencil-family",
+      "name": "温暖彩铅家庭讲解",
+      "path": "themes/warm-pencil-family",
+      "renderer_mode": "paper",
+      "resolution": [
+        1920,
+        1080
+      ],
+      "default": false,
+      "applicable_scenarios": [
+        "亲子与家庭生活",
+        "心理与行为习惯",
+        "生活方式与社会观察",
+        "需要通过人物关系、日常动作和情境理解观点的通俗解释",
+        "轻量科普与人文类内容"
+      ]
     }
   ]
 }
