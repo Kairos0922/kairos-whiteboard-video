@@ -636,7 +636,11 @@ def run_words_mode(ep: Path, out_dir: Path) -> int:
               f"-{sc_win['end_ms']}ms ({duration_ms}ms)  matched={ann['meta']['matched']}")
     for wmsg in all_warnings:
         print(f"  ! {wmsg}")
-    return 0 if ok else 0   # 告警不阻断（人审决定），结构错误由 validate 兜底
+    fallback_warnings = [w for w in all_warnings if "退回区内均分" in w]
+    if fallback_warnings:
+        print(f"✗ annotation blocked: {len(fallback_warnings)} 个元素未能绑定真实语音锚点")
+        return 1
+    return 0 if ok else 1
 
 
 def _ensure_layout_json(ep: Path) -> None:
@@ -705,7 +709,9 @@ def _ensure_layout_json(ep: Path) -> None:
     for i, sc in enumerate(scenes):
         sid = sc.get("id") or f"scene-{i+1:02d}"
         n_elements = len(sc.get("elements", []))
-        layout[sid] = {"panels": _grid_layout(max(2, n_elements))}
+        if n_elements <= 0:
+            raise ValueError(f"{sid} 没有 elements[]：无法建立可验证的绘制区域")
+        layout[sid] = {"panels": _grid_layout(n_elements)}
 
     layout_path.write_text(json.dumps(layout, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"  ✓ 自动生成 layout.json（{len(layout)} 幕，默认网格布局）")
