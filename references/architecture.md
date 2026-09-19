@@ -57,7 +57,7 @@ Required behavior:
 - theme asset change: invalidate dependent render outputs.
 - subtitle-only change: do not regenerate boards.
 
-Prefer hashes / fingerprints over timestamps.
+Prefer hashes / fingerprints over timestamps. Render cache must include the renderer implementation and all scene inputs; changing engine code invalidates affected renders automatically.
 
 ## 5. Quality gates
 
