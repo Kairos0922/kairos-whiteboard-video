@@ -55,9 +55,9 @@ def build_scene_payload(scene_id: str, subject: str, theme_dir: Path,
         parts.append(character_sheet.strip())
     if character_references:
         ref_lines = [
-            "REFERENCE IMAGE INPUTS — USE THESE AS THE PRIMARY IDENTITY SOURCE:",
+            "REFERENCE IMAGE INPUTS — USE THE CANONICAL SHEET AS THE PRIMARY IDENTITY SOURCE:",
             "For each referenced character, the host image model should attach/use the listed reference image(s) "
-            "when supported. The canonical sheet is the fallback master. Do not redraw identity from text alone."
+            "when supported. Individual character references are optional secondary evidence. Do not redraw identity from text alone."
         ]
         for ref in character_references:
             line = (
