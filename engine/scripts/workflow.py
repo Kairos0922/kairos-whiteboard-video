@@ -449,9 +449,9 @@ def cmd_confirm_voice(episode_dir: Path, args) -> int:
     state["voice_fingerprints"] = fp
     already = bool(state["phases"].get("script_audio_confirmed"))
     state["phases"]["script_audio_confirmed"] = True
-    # 同步新流程：voice 成功即内容已确认（兼容旧流程，新流程在 confirm-content 时已设置）
+    # confirm-voice 只记录 TTS 产物状态；内容确认必须由 confirm-content 明确完成。
     conf = state.setdefault("confirmations", {})
-log = state.setdefault("confirmation_log", [])
+    log = state.setdefault("confirmation_log", [])
     if not any(c.get("kind") == "script_audio" for c in log):
         log.append({"at": _now(), "kind": "script_audio"})
     _write_state(episode_dir, state)
@@ -765,7 +765,7 @@ def cmd_confirm_visual(episode_dir: Path, args) -> int:
 
 def cmd_confirm_final(episode_dir: Path, args) -> int:
     """第3次确认：最终产物（视频交付）。
-    检查最终视频存在，设置 final_confirmed=true。
+    必须已完成第2次视觉确认、最终视频存在且完整机器 QA 零阻断。
     """
     state = _load_state_or_fail(episode_dir)
     if state is None:
@@ -773,6 +773,9 @@ def cmd_confirm_final(episode_dir: Path, args) -> int:
     final_path = episode_dir / "deliverables" / "final.mp4"
     if not final_path.exists():
         print("闸门：deliverables/final.mp4 不存在，不确认")
+        return 3
+    if not state.get("confirmations", {}).get("visual_confirmed"):
+        print("闸门：第2次视觉确认未完成，不确认最终产物")
         return 3
     # 第3次确认必须建立在完整机器 QA 通过之上，不能仅以文件存在作为证据。
     from whiteboard_story import validate as validate_mod
