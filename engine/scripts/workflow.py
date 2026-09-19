@@ -133,7 +133,6 @@ def cmd_init(episode_dir: Path, title: str, args) -> int:
         "episode_dir": str(episode_dir),
         "title": title,
         "created": _now(), "updated": _now(),
-        "theme": str(_default_theme_dir().resolve()) if _default_theme_dir() else None,
         # 三次确认（质量门）：方向→视觉→交付
         "confirmations": {
             "content_confirmed": False,   # 第1次：内容与方向（大纲+脚本+主题）
@@ -481,21 +480,21 @@ def _default_theme_dir() -> Path | None:
 
 def _theme_dir(args, state: dict | None = None) -> Path | None:
     raw = getattr(args, "theme", None) or (state or {}).get("theme")
-    if raw:
-        p = Path(raw)
-        if p.is_file():
-            return p.parent
-        return p
-    return _default_theme_dir()
+    if not raw:
+        return None
+    p = Path(raw)
+    if p.is_file():
+        return p.parent
+    return p
 
 
 def cmd_prompts(episode_dir: Path, args) -> int:
     state = _load_state_or_fail(episode_dir)
     if state is None:
         return 1
-    theme = _theme_dir(args, state)
+    theme = _theme_dir(args, state) or _default_theme_dir()
     if theme is None or not theme.exists():
-        print("缺主题目录：--theme themes/<id> 或先在 voice 时登记 state.theme")
+        print("缺主题目录：--theme themes/<id>；当前 registry 未声明可用 default theme")
         return 1
     theme_check = review_images.validate_theme_package(theme)
     if not theme_check["ok"]:
