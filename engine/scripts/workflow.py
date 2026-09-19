@@ -9,8 +9,12 @@
   python workflow.py voice           --episode-dir <dir> [--script <file>] [--voice NAME]
                                      [--rate X] [--theme <theme-dir>] [--force]
   python workflow.py confirm-voice   --episode-dir <dir>
+  python workflow.py character-sheet --episode-dir <dir> [--theme <theme-dir>]
+      # 生成 canonical character sheet prompt；宿主模型只生成 1 张人物母版图
+  python workflow.py import-character-sheet --episode-dir <dir> --image <file>
+      # 导入并固定项目级人物母版
   python workflow.py prompts         --episode-dir <dir> --theme <theme-dir> [--scene id]
-      # 打出宿主模型要用的板图 prompt（不生图）。全部幕一次性批量出图、批量确认。
+      # 打出宿主模型要用的板图 prompt（不生图）。每个 Scene 独立生成；审查可批量进行。
   python workflow.py probe           --theme <theme-dir>
       # 主题探针 prompt。验证画风用；探针图为临时产物，不入主题包。
   python workflow.py lint            --episode-dir <dir>
