@@ -451,9 +451,7 @@ def cmd_confirm_voice(episode_dir: Path, args) -> int:
     state["phases"]["script_audio_confirmed"] = True
     # 同步新流程：voice 成功即内容已确认（兼容旧流程，新流程在 confirm-content 时已设置）
     conf = state.setdefault("confirmations", {})
-    if not conf.get("content_confirmed"):
-        conf["content_confirmed"] = True
-    log = state.setdefault("confirmation_log", [])
+log = state.setdefault("confirmation_log", [])
     if not any(c.get("kind") == "script_audio" for c in log):
         log.append({"at": _now(), "kind": "script_audio"})
     _write_state(episode_dir, state)
@@ -741,6 +739,9 @@ def cmd_confirm_visual(episode_dir: Path, args) -> int:
     state = _load_state_or_fail(episode_dir)
     if state is None:
         return 1
+    if not state.get("confirmations", {}).get("content_confirmed"):
+        print("闸门：第1次内容确认未完成，不确认视觉方案")
+        return 3
     if not state["phases"].get("boards_generated"):
         print("闸门：场景图自动检查未全过，不确认")
         return 3
@@ -772,6 +773,21 @@ def cmd_confirm_final(episode_dir: Path, args) -> int:
     final_path = episode_dir / "deliverables" / "final.mp4"
     if not final_path.exists():
         print("闸门：deliverables/final.mp4 不存在，不确认")
+        return 3
+    # 第3次确认必须建立在完整机器 QA 通过之上，不能仅以文件存在作为证据。
+    from whiteboard_story import validate as validate_mod
+    blockers, warnings, info = validate_mod.validate(episode_dir)
+    try:
+        from whiteboard_story import qa_gates
+        qbad, _qwarn, _rows = qa_gates.run_all(episode_dir, None)
+        blockers = blockers + qbad
+    except Exception as e:
+        print(f"闸门：qa_gates 执行失败（{e}），不确认")
+        return 3
+    if blockers:
+        print(f"闸门：完整验证未通过，共 {len(blockers)} 项阻断，不确认")
+        for b in blockers:
+            print(f"  ✗ {b}")
         return 3
     conf = state.setdefault("confirmations", {})
     conf["final_confirmed"] = True
