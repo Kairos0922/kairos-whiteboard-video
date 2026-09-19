@@ -27,7 +27,7 @@ def fingerprint_files(paths: Iterable[Path], *, metadata: dict | None = None) ->
             manifest.append({"path": str(path), "missing": True})
             continue
         manifest.append({
-            "path": str(path.resolve()),
+            "path": path.name,
             "sha256": file_sha256(path),
             "size": path.stat().st_size,
         })
