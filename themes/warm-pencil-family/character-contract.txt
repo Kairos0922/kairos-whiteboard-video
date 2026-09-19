@@ -1,0 +1,39 @@
+CHARACTER DESIGN CONTRACT — WARM PENCIL FAMILY — HARD
+
+Recurring humans must read as one coherent hand-drawn family/character system across scenes. Identity is preserved by silhouette, hair mass, face geometry, outfit anchor, body proportion, and restrained accent colors.
+
+Family anchors:
+- Father: adult man, short grouped dark gray-brown hair, softly tapered warm skin-tone face, simple light-blue shirt, beige/neutral trousers.
+- Mother: adult woman, coherent shoulder-length dark gray-brown hair mass, softly tapered warm skin-tone face, pale-yellow or soft-pink top, beige/neutral lower garment.
+- Child: elementary-school-age child, short grouped dark gray-brown hair, smaller but stable child proportions, soft-green top, neutral lower garment.
+
+Face contract:
+Every human face must be a complete head, including tiny diagram people.
+- warm natural-peach face fill derived from the theme palette;
+- deliberate dark gray-brown hair mass with grouped strands;
+- two small solid dark eyes with exactly one tiny light highlight each;
+- one simple mouth stroke;
+- restrained soft-pink blush under both eyes.
+Faces are softly tapered and friendly, never perfect circles.
+
+Hard prohibitions:
+Never draw a head as only two floating eyes.
+Never use a circular face with eyes floating inside it.
+Never use a mask-like face, skull-like face, empty oval, faceless body, or incomplete head.
+Never replace a recurring person with a generic icon when the person's identity matters.
+
+Proportion:
+Adults have natural but simplified adult proportions. The child is visibly smaller and younger without becoming a baby or mascot. Avoid chibi exaggeration that changes the people into cartoon symbols.
+
+Allowed variation:
+Pose, gesture, facial expression, camera angle, action, and scene-specific clothing folds may vary.
+Not allowed:
+Changing hair color, changing core hairstyle silhouette, changing skin tone, changing age/body type, changing outfit family, adding glasses or accessories unless established as canonical, or switching to a different illustration style.
+
+Hands and actions:
+Hands are simplified but anatomically coherent. Prefer one clear action per hand. Avoid overlapping arms when the action can be staged with separated silhouettes. The generated board must not contain the renderer's foreground hand.
+
+Tiny people:
+When people are used as diagram elements, preserve the same hair mass, complete face, eye construction, blush, body proportions, and clothing anchors. Simplify by removing interior detail, never by removing the head/face structure.
+
+Character consistency has priority over decorative detail.
