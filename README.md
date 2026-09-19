@@ -98,6 +98,15 @@ TTS 生成：
 
 ### 2.4 Character Consistency
 
+跨幕人物不依赖“每幕重新描述一次角色”。Skill 层采用项目级 **Canonical Character Sheet** 作为视觉身份母版：
+
+1. `input/characters.json` 定义稳定 Character ID 与 immutable anchors。
+2. `character-sheet` 生成一次母版图 prompt；宿主图像模型只生成这一张参考图。
+3. `import-character-sheet` 将母版固定到 `input/character-sheet.png`。
+4. `prompts` 对实际引用人物的 Scene 注入 Character Bible + canonical sheet + 可选单角色 reference image。
+5. 如果脚本存在人物引用但 canonical sheet 缺失，`prompts` 直接阻断，不退回“只靠文字描述”。
+
+
 涉及人物的项目使用：
 
 ```
