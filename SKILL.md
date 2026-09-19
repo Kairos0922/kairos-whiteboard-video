@@ -85,9 +85,9 @@ lint 有 blocking findings 时不得进入板图阶段。
 
 ~~~bash
 cd engine
-uv run python scripts/workflow.py prompts --episode-dir ../projects/<episode> --theme ../themes/<theme>
+uv run python scripts/workflow.py prompts --episode-dir ../projects/<episode> [--theme ../themes/<theme>]
 # 使用宿主图像模型批量生成 boards/
-uv run python scripts/workflow.py import --episode-dir ../projects/<episode> --boards-dir ../projects/<episode>/build/boards --theme ../themes/<theme>
+uv run python scripts/workflow.py import --episode-dir ../projects/<episode> --boards-dir ../projects/<episode>/build/boards [--theme ../themes/<theme>]
 uv run python scripts/build_video.py --episode-dir ../projects/<episode> layout
 uv run python scripts/build_video.py --episode-dir ../projects/<episode> annotate
 uv run python scripts/workflow.py confirm-visual --episode-dir ../projects/<episode>
@@ -107,7 +107,7 @@ uv run python scripts/workflow.py confirm-visual --episode-dir ../projects/<epis
 ~~~bash
 cd engine
 uv run python scripts/workflow.py voice --episode-dir ../projects/<episode>
-uv run python scripts/build_video.py --episode-dir ../projects/<episode> render --jobs 4
+uv run python scripts/workflow.py render --episode-dir ../projects/<episode> --jobs 4
 uv run python scripts/build_video.py --episode-dir ../projects/<episode> assemble
 uv run python scripts/workflow.py validate --episode-dir ../projects/<episode> --full
 uv run python scripts/workflow.py confirm-final --episode-dir ../projects/<episode>
@@ -189,7 +189,7 @@ human contact-sheet review
 ## 7. 当前能力边界
 
 - 板图质量受宿主图像模型影响；引擎通过 prompt contract、reference image 和自动检查降低不确定性。
-- Character reference 能提高一致性，但不能承诺生成模型达到像素级一致。
-- 当前正式主题以 themes/registry.json 为准。
+- 跨幕人物必须经过 Character Bible、reference image 和 scene 引用校验；生成模型仍不能承诺像素级一致，因此最终一致性以 contact sheet 人审为准。
+- 当前正式主题以 themes/registry.json 为准；registry 中显式标记的 default 主题会自动作为新项目默认主题。
 - 渲染内核以增量揭示为主；未实现的操作不得进入正式表达计划。
 - Agent 不负责发布。
