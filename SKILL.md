@@ -15,7 +15,7 @@ metadata:
 
 > Core model: knowledge → cognitive transitions → expression → timeline → deterministic rendering.
 
-本 Skill 不负责生成板图。宿主模型负责出图；引擎负责校验、版式、时间轴、绘制和合成。
+本 Skill 不负责生成板图。宿主模型负责出图；引擎负责校验、版式、时间轴、绘制和合成。涉及跨幕人物时，Skill 先建立项目级 Canonical Character Sheet，再把它作为场景图的主参考输入。
 
 ## 1. 不可破坏的系统不变量
 
