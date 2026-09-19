@@ -725,7 +725,11 @@ def main() -> int:
     out_dir = ep / "build" / "annotations"
 
     # 确保 layout.json 存在（不存在时自动生成默认布局）
-    _ensure_layout_json(ep)
+    try:
+        _ensure_layout_json(ep)
+    except ValueError as exc:
+        print(f"✗ {exc}")
+        return 1
 
     if (ep / "input" / "words.json").exists():
         return run_words_mode(ep, out_dir)
