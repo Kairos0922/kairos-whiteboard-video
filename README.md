@@ -665,4 +665,3 @@ quality-checklist.md
 
 MIT.
 
-渲染数学底座复用 MIT 项目 [whiteboard-video-engine](https://github.com/gnipbao/whiteboard-video-engine)，并锁定到项目声明的 revision。
