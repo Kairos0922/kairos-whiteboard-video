@@ -190,6 +190,6 @@ human contact-sheet review
 
 - 板图质量受宿主图像模型影响；引擎通过 prompt contract、reference image 和自动检查降低不确定性。
 - 跨幕人物必须经过 Character Bible、reference image 和 scene 引用校验；生成模型仍不能承诺像素级一致，因此最终一致性以 contact sheet 人审为准。
-- 当前正式主题以 themes/registry.json 为准；registry 中显式标记的 default 主题会自动作为新项目默认主题。
+- 当前正式主题以 themes/registry.json 为准；registry 中显式标记的 default 主题会作为 prompts 的默认主题，用户仍可显式覆盖。
 - 渲染内核以增量揭示为主；未实现的操作不得进入正式表达计划。
 - Agent 不负责发布。
