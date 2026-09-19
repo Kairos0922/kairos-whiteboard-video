@@ -16,7 +16,7 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 # 渲染内核 v1 已就位（scripts/whiteboard_story/kernel.py）：分区时序揭示 + 骨架描线 +
-# 蛇形填色，数学底座复用上方 MIT 引擎（锁定 commit）。设计决策见 references/kernel-design.md。
+# 蛇形填色；底层渲染依赖固定到上方 Git revision，设计决策见 references/kernel-design.md。
 
 [tool.uv]
 package = false
