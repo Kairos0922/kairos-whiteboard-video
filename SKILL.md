@@ -83,6 +83,17 @@ lint 有 blocking findings 时不得进入板图阶段。
 
 ### Stage B — Visual
 
+涉及跨幕人物时，先执行一次角色母版流程：
+
+```bash
+uv run python scripts/workflow.py character-sheet --episode-dir ../projects/<episode> --theme ../themes/<theme>
+# 宿主图像模型只生成 1 张 canonical character sheet
+uv run python scripts/workflow.py import-character-sheet --episode-dir ../projects/<episode> --image <character-sheet.png>
+```
+
+母版固定后，再生成场景 prompts / boards。
+
+
 ~~~bash
 cd engine
 uv run python scripts/workflow.py prompts --episode-dir ../projects/<episode> [--theme ../themes/<theme>]
