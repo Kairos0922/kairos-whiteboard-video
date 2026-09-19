@@ -15,6 +15,6 @@
 
 ### warm-pencil-family 状态
 
-`warm-pencil-family` 当前是候选主题，已完成主题包、角色契约和固定 Probe 定义，但尚未完成宿主模型 Probe 验证，因此暂不进入 `registry.json`，也不作为正式发布主题。
+`warm-pencil-family` 已完成宿主模型 Probe 验证并冻结风格块，现已进入 `registry.json`，可作为正式主题使用。主题级前景手素材按实际渲染需求单独配置；板图本身始终不得生成手。
 
 新建主题走 `references/theme-onboarding.md`：参考图或描述 → 临时探针 → 冻结 → 入库。参考图与探针图均不留在主题包。
