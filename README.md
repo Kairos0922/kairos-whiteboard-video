@@ -295,6 +295,24 @@ uv run python scripts/workflow.py lint \
   --episode-dir ../projects/my-episode
 ```
 
+### Generate canonical character sheet (when scenes contain recurring characters)
+
+```bash
+uv run python scripts/workflow.py character-sheet \
+  --episode-dir ../projects/my-episode \
+  --theme ../themes/warm-pencil-family
+```
+
+宿主模型只生成 **1 张**角色母版图，然后导入：
+
+```bash
+uv run python scripts/workflow.py import-character-sheet \
+  --episode-dir ../projects/my-episode \
+  --image /path/to/character-sheet.png
+```
+
+只有母版固定后，才进入场景板图生成。
+
 ### Generate board prompts
 
 ```bash
