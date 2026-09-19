@@ -653,7 +653,7 @@ quality-checklist.md
 
 - 板图生成依赖宿主图像模型，不保证所有模型都能稳定遵守复杂视觉约束。
 - Character reference 能显著提高一致性，但不能从工程层面保证生成模型实现像素级身份一致。
-- 当前 `themes/registry.json` 只有一个经过冻结验证的主题。
+- 当前 `themes/registry.json` 包含两个经过冻结验证的主题；默认主题仍为 `chalkboard-chibi`，`warm-pencil-family` 需要按内容语义显式选择。
 - 白板渲染内核仍以追加式揭示为主，不支持任意擦除和自由镜头运动。
 - 发布动作不由 agent 自动执行。
 
