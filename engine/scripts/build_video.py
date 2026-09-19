@@ -40,6 +40,9 @@ from whiteboard_story.apply_layout import apply_layout            # noqa: E402
 from whiteboard_story.render_trace import render_scene, DEFAULT_HAND  # noqa: E402
 from whiteboard_story.resource_resolver import ResourceResolver       # noqa: E402
 from whiteboard_story.karaoke_ass import write_ass                    # noqa: E402
+from whiteboard_story.artifact_fingerprint import (                    # noqa: E402
+    fingerprint_files, read_fingerprint, write_fingerprint,
+)
 
 TAIL_RESERVE_MS = 500   # 标注排程须给渲染器凝视段预留的最小余量（make_annotations_v2 TAIL_MS 保证）
 
@@ -102,25 +105,57 @@ def _update_state(ep: Path, **phase_flags) -> None:
                                encoding="utf-8")
 
 
+def _render_dependencies(ep: Path, sid: str, hand_png: Path) -> list[Path]:
+    """Return every file whose content can change the rendered scene."""
+    return [
+        ep / "build" / "boards-layout" / f"{sid}.png",
+        ep / "build" / "boards-layout" / f"{sid}.raw.png",
+        ep / "build" / "boards-layout" / f"{sid}.labels.json",
+        ep / "build" / "annotations" / f"{sid}.annotation.json",
+        Path(hand_png),
+        SCRIPTS / "whiteboard_story" / "render_trace.py",
+        SCRIPTS / "whiteboard_story" / "kernel.py",
+        SCRIPTS / "whiteboard_story" / "apply_layout.py",
+        SCRIPTS / "build_video.py",
+        SCRIPTS.parent / "pyproject.toml",
+        SCRIPTS.parent / "uv.lock",
+    ]
+
+
+def _render_fingerprint(ep: Path, sid: str, hand_png: Path) -> str:
+    deps = _render_dependencies(ep, sid, hand_png)
+    return fingerprint_files(
+        deps,
+        metadata={
+            "scene": sid,
+            "fps": FPS,
+            "board_style": "chalk",
+            "hand_follow": 0.35,
+        },
+    )
+
+
+def _render_fingerprint_path(ep: Path, sid: str) -> Path:
+    return ep / "build" / "render-fingerprints" / f"{sid}.json"
+
+
 def _needs_render(ep: Path, sid: str, hand_png: Path) -> bool:
-    """增量渲染判断：输出视频不存在或比依赖文件旧时返回 True。
-    依赖文件：板图（boards-layout/<sid>.png）+ 标注（annotations/<sid>.annotation.json）+ 手笔。
-    """
+    """Incremental render decision based on content, never filesystem mtime."""
     out = ep / "build" / "scenes" / f"{sid}.mp4"
     if not out.exists():
         return True
-    out_mtime = out.stat().st_mtime
-    # 依赖文件列表
-    deps = [
-        ep / "build" / "boards-layout" / f"{sid}.png",
-        ep / "build" / "boards-layout" / f"{sid}.raw.png",
-        ep / "build" / "annotations" / f"{sid}.annotation.json",
-        Path(hand_png),
-    ]
-    for dep in deps:
-        if dep.exists() and dep.stat().st_mtime > out_mtime:
-            return True
-    return False
+    expected = _render_fingerprint(ep, sid, hand_png)
+    return read_fingerprint(_render_fingerprint_path(ep, sid)) != expected
+
+
+def _record_render_fingerprint(ep: Path, sid: str, hand_png: Path) -> None:
+    deps = _render_dependencies(ep, sid, hand_png)
+    fp = _render_fingerprint(ep, sid, hand_png)
+    write_fingerprint(
+        _render_fingerprint_path(ep, sid),
+        fp,
+        inputs=[str(p) for p in deps],
+    )
 
 
 def cmd_layout(ep: Path, args) -> int:
@@ -215,6 +250,7 @@ def cmd_render(ep: Path, args) -> int:
                 initial_board_png=prev,
                 hand_follow=getattr(args, "hand_follow", 0.35),
                 labels_json=ep / "build" / "boards-layout" / f"{sid}.labels.json")
+            _record_render_fingerprint(ep, sid, hand)
             print(f"OK {sid}.mp4  {time.time() - t0:.0f}s  -> {out}")
         if not args.scene:
             _update_state(ep, rendered=True)
@@ -261,6 +297,7 @@ def cmd_render(ep: Path, args) -> int:
                 continue
             procs.pop(sid)
             if rc == 0 and (ep / "build" / "scenes" / f"{sid}.mp4").exists():
+                _record_render_fingerprint(ep, sid, hand)
                 print(f"OK {sid}.mp4")
             else:
                 if retry_count[sid] < MAX_RETRY:

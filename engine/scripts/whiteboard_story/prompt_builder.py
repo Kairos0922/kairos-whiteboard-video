@@ -60,11 +60,13 @@ def build_scene_payload(scene_id: str, subject: str, theme_dir: Path,
             "when supported. The canonical sheet is the fallback master. Do not redraw identity from text alone."
         ]
         for ref in character_references:
-            ref_lines.append(
-                f"- CHARACTER [{ref.get('character_id')}]: " +
-                ", ".join(ref.get("reference_images") or []) +
-                f" | CANONICAL SHEET: {ref.get('canonical_sheet')}"
+            line = (
+                f"- CHARACTER [{ref.get('character_id')}]: "
+                + ", ".join(ref.get("reference_images") or [])
             )
+            if ref.get("canonical_sheet"):
+                line += f" | CANONICAL SHEET: {ref['canonical_sheet']}"
+            ref_lines.append(line)
         parts.append("\n".join(ref_lines))
     parts.append(subject)
     if n_islands and n_islands > 1:

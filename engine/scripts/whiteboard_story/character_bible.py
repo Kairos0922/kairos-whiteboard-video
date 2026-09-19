@@ -169,25 +169,27 @@ def scene_character_ids(scene: dict) -> list[str]:
 def character_reference_manifest(episode_dir: Path, chars: list[dict], character_ids: list[str] | None = None) -> list[dict]:
     wanted = set(str(x) for x in (character_ids or []) if str(x).strip())
     selected = [c for c in chars if not wanted or str(c.get("id")) in wanted]
+    canonical = (Path(episode_dir) / "input" / "character-sheet.png").resolve()
     return [{
         "character_id": str(c.get("id")),
         "name": str(c.get("name") or c.get("id")),
         "reference_images": [str(p) for p in reference_images_for_character(episode_dir, c)],
-        "canonical_sheet": str((Path(episode_dir) / "input" / "character-sheet.png").resolve())
+        "canonical_sheet": str(canonical) if canonical.exists() else None,
     } for c in selected]
 
 
-def build_character_sheet_prompt(chars: list[dict]) -> str:
+def build_character_sheet_prompt(chars: list[dict], theme_name: str | None = None) -> str:
     """生成可供宿主模型一次性绘制 canonical character sheet 的提示词。"""
     block = render_prompt_block(chars)
     if not block:
         return ""
+    theme_note = f" Theme: {theme_name}." if theme_name else ""
     return (
-        "CANONICAL CHARACTER SHEET — HARD REFERENCE MASTER\n"
+        "CANONICAL CHARACTER SHEET — HARD REFERENCE MASTER.\n"
         "Create one clean reference sheet containing every character below, three-quarter full body or waist-up, "
         "neutral pose, facing mostly forward, isolated on the exact theme background, with each character clearly "
-        "separated. This sheet is the canonical appearance reference for every later scene.\n\n"
-        + block
+        "separated. This sheet becomes the canonical appearance reference for later scenes."
+        + theme_note + "\n\n" + block
     )
 
 
