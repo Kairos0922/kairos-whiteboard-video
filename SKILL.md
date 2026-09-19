@@ -126,7 +126,7 @@ uv run python scripts/workflow.py confirm-final --episode-dir ../projects/<episo
 
 ## 3. 用户体验规则
 
-- **批量而不是逐幕确认**：全部板图一次生成、一次审查。
+- **批量而不是逐幕确认**：全部场景图分别生成；审查仍可一次性批量进行。
 - **低风险步骤自动化**：TTS、layout、annotation、render、validate 不增加额外人工确认。
 - **局部修改优先**：修改一幕只重跑该幕及其下游依赖，不重做整期。
 - **状态可解释**：status 必须明确当前质量门、阻断原因和下一步。
