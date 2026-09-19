@@ -116,6 +116,9 @@ def _render_dependencies(ep: Path, sid: str, hand_png: Path) -> list[Path]:
         SCRIPTS / "whiteboard_story" / "render_trace.py",
         SCRIPTS / "whiteboard_story" / "kernel.py",
         SCRIPTS / "whiteboard_story" / "apply_layout.py",
+        SCRIPTS / "build_video.py",
+        SCRIPTS.parent / "pyproject.toml",
+        SCRIPTS.parent / "uv.lock",
     ]
 
 
