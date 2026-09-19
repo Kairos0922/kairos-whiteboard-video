@@ -55,7 +55,7 @@ probe / lint / spans / import / confirm-boards / render / validate`。
 ## 测试
 
 ```bash
-cd engine && uv sync && uv run pytest -q      # 60 用例，含 IR 契约 lint 与渲染内核
+cd engine && uv sync && uv run pytest -q      # 当前 CI 测试集以实际 pytest 收集数为准
 ```
 
 ## License
