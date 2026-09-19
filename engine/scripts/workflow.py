@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -132,6 +133,7 @@ def cmd_init(episode_dir: Path, title: str, args) -> int:
         "episode_dir": str(episode_dir),
         "title": title,
         "created": _now(), "updated": _now(),
+        "theme": str(_default_theme_dir().resolve()) if _default_theme_dir() else None,
         # 三次确认（质量门）：方向→视觉→交付
         "confirmations": {
             "content_confirmed": False,   # 第1次：内容与方向（大纲+脚本+主题）
@@ -461,14 +463,30 @@ def cmd_confirm_voice(episode_dir: Path, args) -> int:
     return 0
 
 
+def _default_theme_dir() -> Path | None:
+    """Resolve the explicitly registered default theme, if one exists."""
+    registry = Path(__file__).resolve().parents[2] / "themes" / "registry.json"
+    if not registry.exists():
+        return None
+    try:
+        data = json.loads(registry.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    for entry in data.get("themes", []):
+        if entry.get("default") is True:
+            path = Path(__file__).resolve().parents[2] / str(entry.get("path", ""))
+            return path if path.is_dir() else None
+    return None
+
+
 def _theme_dir(args, state: dict | None = None) -> Path | None:
     raw = getattr(args, "theme", None) or (state or {}).get("theme")
-    if not raw:
-        return None
-    p = Path(raw)
-    if p.is_file():
-        return p.parent
-    return p
+    if raw:
+        p = Path(raw)
+        if p.is_file():
+            return p.parent
+        return p
+    return _default_theme_dir()
 
 
 def cmd_prompts(episode_dir: Path, args) -> int:
@@ -494,6 +512,8 @@ def cmd_prompts(episode_dir: Path, args) -> int:
     scenes = json.loads(script.read_text(encoding="utf-8")).get("scenes", [])
     chars = character_bible.load_characters(episode_dir)
     char_errors = character_bible.validate_characters(chars)
+    char_errors += character_bible.validate_character_references(episode_dir, chars)
+    char_errors += character_bible.validate_scene_refs(chars, scenes)
     if char_errors:
         print("角色圣经校验：")
         for msg in char_errors:
@@ -673,25 +693,9 @@ def cmd_import(episode_dir: Path, args) -> int:
 
 
 def cmd_confirm_boards(episode_dir: Path, args) -> int:
-    state = _load_state_or_fail(episode_dir)
-    if state is None:
-        return 1
-    if not state["phases"].get("boards_generated"):
-        print("闸门：自动检查未全过，不确认")
-        return 3
-    if not all(b["status"] == "ok" for b in state["boards"]):
-        print("闸门：仍有板图 failed/missing")
-        return 3
-    state["phases"]["boards_reviewed"] = True
-    # 同步更新质量门：第2次确认（视觉方案）
-    conf = state.setdefault("confirmations", {})
-    conf["visual_confirmed"] = True
-    log = state.setdefault("confirmation_log", [])
-    if not any(c.get("kind") == "boards" for c in log):
-        log.append({"at": _now(), "kind": "boards"})
-    _write_state(episode_dir, state)
-    print("第二次确认完成：boards_reviewed=true, visual_confirmed=true")
-    return 0
+    """Deprecated alias for confirm-visual; keeps the old command safe."""
+    print("提示：confirm-boards 已弃用，转发到 confirm-visual。")
+    return cmd_confirm_visual(episode_dir, args)
 
 
 def cmd_confirm_content(episode_dir: Path, args) -> int:
@@ -808,14 +812,22 @@ def cmd_render(episode_dir: Path, args) -> int:
     state = _load_state_or_fail(episode_dir)
     if state is None:
         return 1
-    if not state["phases"]["boards_reviewed"]:
+    if not state["phases"].get("boards_reviewed"):
         print("闸门未过：板图人工二审未通过，不渲染")
         return 3
-    if not state["phases"]["annotated"]:
+    if not state["phases"].get("annotated"):
         print("闸门未过：缺少标注")
         return 3
-    print("渲染入口就绪：build_video.py render（须显式 --hand 或项目 assets/hand-pen.png）")
-    return 0
+
+    build = Path(__file__).resolve().parent / "build_video.py"
+    cmd = [sys.executable, str(build), "--episode-dir", str(episode_dir), "render"]
+    if getattr(args, "scene", None):
+        cmd += ["--scene", args.scene]
+    if getattr(args, "jobs", 0):
+        cmd += ["--jobs", str(args.jobs)]
+    if getattr(args, "hand", None):
+        cmd += ["--hand", str(args.hand)]
+    return subprocess.run(cmd, check=False).returncode
 
 
 def cmd_validate(episode_dir: Path, args) -> int:
@@ -918,6 +930,9 @@ def main() -> int:
     p_cfinal.add_argument("--episode-dir", required=True)
     p_render = sub.add_parser("render")
     p_render.add_argument("--episode-dir", required=True)
+    p_render.add_argument("--scene", default=None)
+    p_render.add_argument("--jobs", type=int, default=0)
+    p_render.add_argument("--hand", default=None)
     p_validate = sub.add_parser("validate")
     p_validate.add_argument("--episode-dir", required=True)
     p_validate.add_argument("--full", action="store_true",
