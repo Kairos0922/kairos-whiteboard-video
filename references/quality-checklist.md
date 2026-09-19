@@ -66,6 +66,8 @@
 - [ ] `layout.json` panels 数量 = 该幕 `elements` 数量且序号一一对应；annotate 零降级 warning（字段契约 `engine-design.md` §13）
 - [ ] 全图无文字（编号与标签由版式层叠加）
 - [ ] 角色与当期定妆一致
+- [ ] 有跨幕人物引用时：`input/character-sheet.png` 存在且通过 canonical sheet 校验
+- [ ] 禁止在缺 canonical sheet 时退回“仅靠文字 Character Bible”生成跨幕人物
 - [ ] 编号顺序 = 绘制顺序 = 旁白叙事顺序
 - [ ] 脸部放大审：每板每张脸（含图示里图标级小头）出放大裁切，对照主题角色圣经逐张看；
       "只有眼睛的圆框 / 面具感 / 浮空眼"等骷髅感字形 = 不合格（机筛后人复核）
