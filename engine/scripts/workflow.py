@@ -488,6 +488,71 @@ def _theme_dir(args, state: dict | None = None) -> Path | None:
     return p
 
 
+def cmd_character_sheet(episode_dir: Path, args) -> int:
+    """Generate the host-model prompt for the canonical character sheet."""
+    chars = character_bible.load_characters(episode_dir)
+    errors = character_bible.validate_characters(chars)
+    if errors:
+        for msg in errors:
+            print(f"✗ {msg}")
+        return 1
+    if not chars:
+        print("input/characters.json 为空：没有需要建立视觉母版的角色。")
+        return 1
+    theme = _theme_dir(args) or _default_theme_dir()
+    theme_name = theme.name if theme else None
+    prompt = character_bible.build_character_sheet_prompt(chars, theme_name=theme_name)
+    prompt_path = episode_dir / "input" / "character-sheet.prompt.txt"
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text(prompt + "\n", encoding="utf-8")
+    manifest = character_bible.character_reference_manifest(episode_dir, chars)
+    manifest_path = episode_dir / "input" / "character-reference-manifest.json"
+    manifest_path.write_text(json.dumps({
+        "schema": character_bible.SCHEMA,
+        "theme": theme_name,
+        "characters": manifest,
+        "canonical_sheet": str(character_bible.canonical_sheet_path(episode_dir)),
+        "canonical_sheet_required_for_character_scenes": True,
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(prompt)
+    print(f"\n→ {prompt_path}")
+    print("宿主图像模型只生成 1 张 canonical character sheet；不要生成场景板图。")
+    return 0
+
+
+def cmd_import_character_sheet(episode_dir: Path, args) -> int:
+    """Import and lock the project-level canonical character sheet."""
+    src = Path(args.image).expanduser().resolve()
+    if not src.exists():
+        print(f"✗ 角色母版图不存在：{src}")
+        return 1
+    if src.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+        print(f"✗ 角色母版图格式不支持：{src.name}")
+        return 1
+    try:
+        from PIL import Image
+        with Image.open(src) as img:
+            if img.width < 512 or img.height < 512:
+                print(f"✗ 角色母版图分辨率过低：{img.size}（至少 512×512）")
+                return 1
+            img.verify()
+    except Exception as exc:
+        print(f"✗ 角色母版图无法读取：{src}：{exc}")
+        return 1
+    dest = character_bible.canonical_sheet_path(episode_dir)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    import shutil
+    shutil.copy2(src, dest)
+    errors = character_bible.validate_canonical_sheet(episode_dir)
+    if errors:
+        for msg in errors:
+            print(f"✗ {msg}")
+        return 1
+    print(f"✓ canonical character sheet 已固定：{dest}")
+    print("后续 prompts 会把它作为跨幕人物身份的主参考图。")
+    return 0
+
+
 def cmd_prompts(episode_dir: Path, args) -> int:
     state = _load_state_or_fail(episode_dir)
     if state is None:
@@ -513,6 +578,11 @@ def cmd_prompts(episode_dir: Path, args) -> int:
     char_errors = character_bible.validate_characters(chars)
     char_errors += character_bible.validate_character_references(episode_dir, chars)
     char_errors += character_bible.validate_scene_refs(chars, scenes)
+    scene_character_ids = list(dict.fromkeys(
+        cid for sc in scenes for cid in character_bible.scene_character_ids(sc)
+    ))
+    if scene_character_ids:
+        char_errors += character_bible.validate_canonical_sheet(episode_dir)
     if char_errors:
         print("角色圣经校验：")
         for msg in char_errors:
@@ -528,6 +598,7 @@ def cmd_prompts(episode_dir: Path, args) -> int:
         if want and sid != want:
             continue
         character_ids = character_bible.scene_character_ids(sc)
+        character_sheet = character_bible.render_prompt_block(chars, character_ids)
         references = character_bible.character_reference_manifest(episode_dir, chars, character_ids)
         payload = prompt_builder.build_scene_payload(
             sid, sc.get("board_subject") or sc.get("subject") or "", theme,
@@ -901,6 +972,14 @@ def main() -> int:
     p_voice.add_argument("--force", action="store_true")
     p_cvoice = sub.add_parser("confirm-voice")
     p_cvoice.add_argument("--episode-dir", required=True)
+    p_charsheet = sub.add_parser("character-sheet",
+                                  help="生成 canonical character sheet 宿主模型 prompt")
+    p_charsheet.add_argument("--episode-dir", required=True)
+    p_charsheet.add_argument("--theme", default=None)
+    p_import_charsheet = sub.add_parser("import-character-sheet",
+                                         help="导入项目级 canonical character sheet")
+    p_import_charsheet.add_argument("--episode-dir", required=True)
+    p_import_charsheet.add_argument("--image", required=True)
     p_prompts = sub.add_parser("prompts")
     p_prompts.add_argument("--episode-dir", required=True)
     p_prompts.add_argument("--theme", default=None)
@@ -948,6 +1027,8 @@ def main() -> int:
         "sync-boards": lambda: cmd_sync_boards(episode_dir, args),
         "voice": lambda: cmd_voice(episode_dir, args),
         "confirm-voice": lambda: cmd_confirm_voice(episode_dir, args),
+        "character-sheet": lambda: cmd_character_sheet(episode_dir, args),
+        "import-character-sheet": lambda: cmd_import_character_sheet(episode_dir, args),
         "prompts": lambda: cmd_prompts(episode_dir, args),
         "lint": lambda: cmd_lint(episode_dir, args),
         "spans": lambda: cmd_spans(episode_dir, args),
