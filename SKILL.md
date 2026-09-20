@@ -152,7 +152,7 @@ build        = 可重生中间产物
 deliverables = 最终交付
 ~~~
 
-不要把单期生成物提交到仓库。
+不要把单期生成物提交到仓库。`projects/` 已由仓库根目录 `.gitignore` 排除；它是用户本地的运行时工作区，不是 Skill / Theme 资产目录。
 
 架构与维护约束见 references/architecture.md。
 
