@@ -155,6 +155,9 @@ Scene Prompts
 | ID | Name | Renderer | Resolution |
 | --- | --- | --- | --- |
 | `chalkboard-chibi` | 黑板粉笔 Q 版讲解 | chalk | 1920×1080 |
+| `warm-pencil-family` | 温暖彩铅家庭讲解 | paper | 1920×1080 |
+
+主题不是固定枚举；新增主题必须经过 Probe、Visual Gate 和 registry 登记。`warm-pencil-family` 当前为已冻结、非默认主题，适用于家庭/育儿、心理/行为、生活方式、人文与轻科普等以人物关系和日常观察为核心的内容。
 
 默认主题以项目的参考板图为视觉合同：深墨绿黑板、暖象牙细线、低饱和辅助色、紧凑的信息岛布局，以及独立的前景粉笔手素材。
 
@@ -475,15 +478,30 @@ kairos-whiteboard-video/
 │
 ├── themes/                          # 可复用主题包
 │   ├── registry.json
-│   └── chalkboard-chibi/
+│   ├── chalkboard-chibi/
+│   └── warm-pencil-family/
 │
-└── projects/                        # 单期项目现场
+└── projects/                        # 本地运行时工作区（已被 .gitignore 排除，不属于仓库）
     └── <episode-id>/
         ├── input/
         ├── build/
         ├── assets/
         └── deliverables/
 ```
+
+### Repository boundary
+
+本仓库只维护可复用的 **Contract / Compiler / Theme**。
+
+单期视频属于本地运行时项目，不进入 Git：
+
+- `projects/<episode-id>/`：单期工作区，由用户本地创建和维护。
+- `input/`：本期确认后的脚本、角色定义、Canonical Character Sheet 等输入资产。
+- `build/`：可重生的板图、layout、annotation、scene 等中间产物。
+- `deliverables/`：本期最终视频及其他交付物。
+- `.gitignore` 已排除整个 `projects/`，因此不应把某一期的角色、板图、视频或其他运行时资产写入主题包或仓库。
+
+**重要边界：** Theme 定义“角色视觉规则”，Episode 定义“本期具体角色身份”。例如 `themes/*/character-contract.txt` 属于可复用的视觉契约；`projects/<episode>/input/characters.json` 与 `character-sheet.png` 属于本期运行时资产。
 
 ### Episode directory
 
@@ -514,7 +532,7 @@ projects/<episode-id>/
     └── final.mp4
 ```
 
-单期生成物原则上不进入仓库；修改引擎后应通过现有输入重新生成。
+单期生成物不进入仓库；修改引擎后应在本地项目中通过已有输入重新生成。
 
 ---
 
